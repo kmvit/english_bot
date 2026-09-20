@@ -72,6 +72,9 @@ class Config:
     whisper_cpu_threads: int = 0         # 0 — на усмотрение ctranslate2
     piper_voice: str = "en_US-lessac-medium"
     piper_model_dir: Path = Path("data/voices")
+    # Темп озвучки: 1.0 — как записан голос, меньше — быстрее, больше —
+    # медленнее. Ученику ниже B1 разборчивость важнее естественности.
+    tts_length_scale: float = 1.3
     azure_speech_key: str = ""
     azure_speech_region: str = ""
 
@@ -128,6 +131,7 @@ def load_config() -> Config:
         whisper_cpu_threads=_int("WHISPER_CPU_THREADS", 0),
         piper_voice=os.getenv("PIPER_VOICE", "en_US-lessac-medium"),
         piper_model_dir=Path(os.getenv("PIPER_MODEL_DIR", "data/voices")),
+        tts_length_scale=_float("TTS_LENGTH_SCALE", 1.3),
         azure_speech_key=azure_key,
         azure_speech_region=azure_region,
         llm_base_url=os.getenv("LLM_BASE_URL", DEFAULT_BASE_URL),

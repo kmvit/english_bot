@@ -186,9 +186,11 @@ class FakeVoice:
 
     def __init__(self):
         self.calls: list[str] = []
+        self.configs: list = []
 
-    def synthesize_wav(self, text, wav_file):
+    def synthesize_wav(self, text, wav_file, syn_config=None):
         self.calls.append(text)
+        self.configs.append(syn_config)
         wav_file.setnchannels(1)
         wav_file.setsampwidth(2)
         wav_file.setframerate(22050)
@@ -302,3 +304,20 @@ async def test_partial_download_is_not_left_behind(config: Config, tmp_path, mon
 
     # Недокачанный файл не должен сойти за готовый голос при следующем запуске.
     assert list(model_dir.glob("*.onnx")) == []
+
+
+async def test_tempo_is_passed_to_piper(voice_files: Config, tmp_path):
+    """Темп речи задаётся настройкой: ученику важнее разборчивость."""
+    fake = FakeVoice()
+    piper = PiperSynthesizer(
+        replace(voice_files, tts_length_scale=1.6), voice_factory=lambda path: fake
+    )
+
+    await piper.synthesize("Hello", tmp_path / "a.wav")
+
+    assert fake.configs[0].length_scale == 1.6
+
+
+async def test_default_tempo_is_slower_than_native(config: Config):
+    """По умолчанию голос замедлен: это бот для изучающих язык."""
+    assert config.tts_length_scale > 1.0

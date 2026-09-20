@@ -108,8 +108,14 @@ class PiperSynthesizer:
     def _write_wav(self, voice: Any, text: str, out_path: Path) -> None:
         import wave
 
+        from piper import SynthesisConfig
+
         try:
             with wave.open(str(out_path), "wb") as wav_file:
-                voice.synthesize_wav(text, wav_file)
+                voice.synthesize_wav(
+                    text,
+                    wav_file,
+                    SynthesisConfig(length_scale=self._config.tts_length_scale),
+                )
         except Exception as exc:
             raise SpeechError(f"Piper не смог озвучить текст: {exc}") from exc
