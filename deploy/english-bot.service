@@ -1,7 +1,10 @@
 [Unit]
 Description=Телеграм-бот «Учитель английского»
-After=network-online.target
+After=network-online.target english-bot-tunnel.service
 Wants=network-online.target
+# Туннель нужен там, где Telegram и OpenRouter недоступны напрямую.
+# Если PROXY_URL не задан, юнит туннеля просто не ставится и связь отпадает.
+Wants=english-bot-tunnel.service
 
 [Service]
 Type=simple

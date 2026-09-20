@@ -95,6 +95,9 @@ class Config:
     log_level: str = "INFO"
     # На части сетей маршрут IPv6 до Telegram не работает и polling виснет молча.
     telegram_force_ipv4: bool = False
+    # SOCKS5/HTTP-прокси для Telegram и OpenRouter: на сервере в России оба
+    # недоступны напрямую, трафик идёт через ssh-туннель до зарубежного хоста.
+    proxy_url: str | None = None
 
     prices: Prices = field(default_factory=Prices)
 
@@ -142,6 +145,7 @@ def load_config() -> Config:
         ffmpeg_bin=os.getenv("FFMPEG_BIN", "ffmpeg"),
         log_level=os.getenv("LOG_LEVEL", "INFO"),
         telegram_force_ipv4=_bool("TELEGRAM_FORCE_IPV4"),
+        proxy_url=_opt("PROXY_URL"),
         prices=Prices(
             input_per_mtok=_float("PRICE_INPUT_PER_MTOK", 2.0),
             output_per_mtok=_float("PRICE_OUTPUT_PER_MTOK", 8.0),

@@ -28,6 +28,11 @@ if [ ! -f "$APP_DIR/.env" ]; then
     exit 1
 fi
 
+# Конфиг читает сервис под www-data, а лежит он от root. Даём доступ группе,
+# но не всему миру: в файле токены бота и ключ OpenRouter.
+chown root:www-data "$APP_DIR/.env"
+chmod 640 "$APP_DIR/.env"
+
 echo "==> Каталог данных"
 mkdir -p "$APP_DIR/data"
 chown -R www-data:www-data "$APP_DIR/data"
@@ -41,8 +46,21 @@ asyncio.run(build_speech(load_config()).warmup())
 print('модели готовы')
 "
 
-echo "==> Сервис systemd"
+echo "==> Сервисы systemd"
 cp "$APP_DIR/deploy/$SERVICE.service" "/etc/systemd/system/$SERVICE.service"
+
+# Туннель ставим, только если он настроен: на машине с прямым доступом
+# в интернет он не нужен и мешал бы запуску бота.
+if [ -f /etc/default/english-bot-tunnel ]; then
+    cp "$APP_DIR/deploy/$SERVICE-tunnel.service" "/etc/systemd/system/$SERVICE-tunnel.service"
+    systemctl daemon-reload
+    systemctl enable --now "$SERVICE-tunnel"
+    sleep 2
+    systemctl is-active --quiet "$SERVICE-tunnel" \
+        && echo "==> Туннель поднят" \
+        || { journalctl -u "$SERVICE-tunnel" -n 10 --no-pager; exit 1; }
+fi
+
 systemctl daemon-reload
 systemctl enable --now "$SERVICE"
 sleep 3

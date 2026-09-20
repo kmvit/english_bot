@@ -1,0 +1,15 @@
+[Unit]
+Description=SSH-туннель для бота (SOCKS5 к Telegram и OpenRouter)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+EnvironmentFile=/etc/default/english-bot-tunnel
+ExecStart=/opt/english_bot/deploy/tunnel.sh
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

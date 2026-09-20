@@ -73,6 +73,36 @@ cp /opt/english_bot/.env.example /opt/english_bot/.env   # заполнить
 /opt/english_bot/deploy/deploy.sh
 ```
 
+### Если Telegram и OpenRouter недоступны с сервера
+
+С российского хостинга `api.telegram.org` не отвечает, а `openrouter.ai`
+отдаёт 403. Трафик заворачивается в SSH-туннель до зарубежной машины:
+
+```bash
+cp /opt/english_bot/deploy/english-bot-tunnel.env.example /etc/default/english-bot-tunnel
+chmod 600 /etc/default/english-bot-tunnel   # заполнить хост, пользователя, ключ
+```
+
+затем в `.env` бота указать локальный конец туннеля:
+
+```
+PROXY_URL=socks5://127.0.0.1:1080
+```
+
+`install.sh` сам поставит юнит туннеля, если найдёт `/etc/default/english-bot-tunnel`,
+и бот будет ждать его запуска. Туннель поднимается через `ssh -N -D` с
+`ExitOnForwardFailure` — без этого флага ssh остался бы жив при занятом порте,
+systemd счёл бы туннель поднятым, а бот стучался бы в пустоту. `ServerAliveInterval`
+роняет ssh при обрыве, после чего systemd перезапускает его через 10 секунд.
+
+Проверить, что туннель работает:
+
+```bash
+curl -x socks5h://127.0.0.1:1080 -s -o /dev/null -w "%{http_code}\n" https://api.telegram.org
+```
+
+HuggingFace с сервера доступен напрямую, поэтому модели качаются без туннеля.
+
 Журнал: `journalctl -u english-bot -f`. В юните стоит `MemoryMax=2G` — при
 утечке ядро убьёт бота, а не соседние сервисы.
 

@@ -44,13 +44,18 @@ def setup_logging(level: str) -> None:
 
 
 def build_session(config: Config) -> AiohttpSession | None:
-    """Сессия с принудительным IPv4: на части сетей IPv6 до Telegram не проходит,
-    и polling зависает без единой ошибки в логе."""
-    if not config.telegram_force_ipv4:
+    """Своя сессия нужна ради прокси и принудительного IPv4.
+
+    Прокси: с российского сервера api.telegram.org недоступен напрямую.
+    IPv4: на части сетей маршрут IPv6 до Telegram не проходит, и polling
+    зависает без единой ошибки в логе.
+    """
+    if not (config.proxy_url or config.telegram_force_ipv4):
         return None
-    session = AiohttpSession()
-    # Публичной точки для настройки коннектора у aiogram нет.
-    session._connector_init["family"] = socket.AF_INET
+    session = AiohttpSession(proxy=config.proxy_url) if config.proxy_url else AiohttpSession()
+    if config.telegram_force_ipv4:
+        # Публичной точки для настройки коннектора у aiogram нет.
+        session._connector_init["family"] = socket.AF_INET
     return session
 
 
@@ -90,7 +95,8 @@ async def run(config: Config) -> None:
 
     await bot.set_my_commands(COMMANDS)
     log.info(
-        "Бот запущен. Модель: %s | распознавание: %s (произношение: %s) | озвучка: %s",
+        "Бот запущен. Прокси: %s | модель: %s | распознавание: %s (произношение: %s) | озвучка: %s",
+        config.proxy_url or "нет",
         config.llm_model,
         speech.recognizer_name,
         "да" if speech.assesses_pronunciation else "нет",

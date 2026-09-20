@@ -60,12 +60,20 @@ class Teacher:
             headers["HTTP-Referer"] = config.openrouter_referer
         if config.openrouter_title:
             headers["X-Title"] = config.openrouter_title
-        self._client = client or openai.AsyncOpenAI(
-            api_key=config.openrouter_api_key,
-            base_url=config.llm_base_url,
-            timeout=90.0,
-            default_headers=headers or None,
-        )
+        if client is None:
+            http_client = (
+                openai.DefaultAsyncHttpxClient(proxy=config.proxy_url)
+                if config.proxy_url
+                else None
+            )
+            client = openai.AsyncOpenAI(
+                api_key=config.openrouter_api_key,
+                base_url=config.llm_base_url,
+                timeout=90.0,
+                default_headers=headers or None,
+                http_client=http_client,
+            )
+        self._client = client
         # Не все модели на OpenRouter принимают json_schema; понижаем режим
         # один раз при первом отказе, чтобы не платить за повторы каждый ход.
         self._format_mode = FORMAT_SCHEMA
