@@ -1,0 +1,26 @@
+[Unit]
+Description=Телеграм-бот «Учитель английского»
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/opt/english_bot
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/english_bot/.venv/bin/python -m bot
+Restart=always
+RestartSec=5
+
+# Whisper на пике занимает ~900 МБ, Piper ещё ~220 МБ. Предел защищает
+# соседей по серверу: при утечке ядро убьёт бота, а не gunicorn или postgres.
+MemoryMax=2G
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

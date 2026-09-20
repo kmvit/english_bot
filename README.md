@@ -37,18 +37,48 @@
 
 ## Запуск
 
-```bash
-cp .env.example .env   # заполнить токены
-docker compose up -d --build
-```
-
-Локально, без Docker (нужен установленный `ffmpeg`):
+Локально (нужен установленный `ffmpeg`):
 
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
-cp .env.example .env
+cp .env.example .env   # заполнить токены
 .venv/bin/python -m bot
 ```
+
+В Docker:
+
+```bash
+docker compose up -d --build
+```
+
+## Деплой на сервер
+
+Боевой сервер — Ubuntu с systemd, без Docker: так же развёрнуты соседние
+сервисы на той же машине, и лишний демон там не нужен.
+
+Первичная установка (от root, сервер чистый):
+
+```bash
+git clone https://github.com/kmvit/english_bot.git /opt/english_bot
+cp /opt/english_bot/.env.example /opt/english_bot/.env   # заполнить
+/opt/english_bot/deploy/install.sh
+```
+
+Скрипт ставит `ffmpeg` и `libgomp1`, собирает venv, **заранее скачивает модели**
+(иначе первое голосовое ждало бы загрузку), ставит юнит systemd и запускает бота.
+
+Обновление после изменений в коде:
+
+```bash
+/opt/english_bot/deploy/deploy.sh
+```
+
+Журнал: `journalctl -u english-bot -f`. В юните стоит `MemoryMax=2G` — при
+утечке ядро убьёт бота, а не соседние сервисы.
+
+**Важно:** Telegram допускает только один экземпляр с одним токеном. Перед
+запуском на сервере остановите локальную копию, иначе оба получат
+`TelegramConflictError` и сообщения не дойдут ни до одного.
 
 ## Переменные окружения
 
