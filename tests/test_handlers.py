@@ -259,7 +259,7 @@ async def test_text_message_goes_through_the_model_and_answers(
 ):
     await dispatcher.feed_raw_update(telegram_bot, text_update("I go to Rome"))
 
-    assert dispatcher["_teacher"].calls[0]["turn"] == "I go to Rome"
+    assert dispatcher["_teacher"].calls[0]["turn"].endswith("I go to Rome")
     assert "Nice! And you?" in session.texts()[0]
     # Голосовые ответы включены по умолчанию — озвучка тоже уходит.
     assert "SendVoice" in session.method_names()
@@ -775,7 +775,7 @@ async def test_drill_can_be_stopped_early(
     assert "Итог: 1 из 1" in session.texts()[-1]
     # После остановки текст снова идёт в обычный диалог.
     await dispatcher.feed_raw_update(telegram_bot, text_update("Hello again", update_id=4))
-    assert dispatcher["_teacher"].calls[0]["turn"] == "Hello again"
+    assert dispatcher["_teacher"].calls[0]["turn"].endswith("Hello again")
 
 
 async def test_drill_survives_model_failure(
@@ -788,3 +788,77 @@ async def test_drill_survives_model_failure(
     await dispatcher.feed_raw_update(telegram_bot, text_update("/drill"))
 
     assert "не отвечает" in session.texts()[0]
+
+
+async def test_daily_question_time_can_be_set(
+    dispatcher: Dispatcher, telegram_bot: Bot, session: FakeSession, db: Database
+):
+    """Время содержит двоеточие — разбор callback_data не должен на нём ломаться."""
+    await db.ensure_profile(USER)
+
+    await dispatcher.feed_raw_update(telegram_bot, callback_update("cfg:daily"))
+    assert "Во сколько писать" in session.texts()[-1]
+
+    await dispatcher.feed_raw_update(telegram_bot, callback_update("cfg:daily:09:00", update_id=2))
+
+    profile = await db.get_profile(USER)
+    assert profile is not None and profile.daily_time == "09:00"
+    assert "Вопрос по утрам: 09:00" in str(session.messages()[-1].reply_markup)
+
+
+async def test_daily_question_can_be_turned_off(
+    dispatcher: Dispatcher, telegram_bot: Bot, db: Database
+):
+    await db.ensure_profile(USER)
+    await db.update_profile(USER, daily_time="09:00", daily_last_sent="2026-09-21")
+
+    await dispatcher.feed_raw_update(telegram_bot, callback_update("cfg:daily:off"))
+
+    profile = await db.get_profile(USER)
+    assert profile is not None and profile.daily_time is None
+
+
+async def test_changing_time_clears_sent_mark(
+    dispatcher: Dispatcher, telegram_bot: Bot, db: Database
+):
+    """Иначе после смены времени вопрос не придёт до завтра."""
+    await db.ensure_profile(USER)
+    await db.update_profile(USER, daily_time="21:00", daily_last_sent="2026-09-21")
+
+    await dispatcher.feed_raw_update(telegram_bot, callback_update("cfg:daily:09:00"))
+
+    profile = await db.get_profile(USER)
+    assert profile is not None and profile.daily_last_sent is None
+
+
+async def test_unknown_time_is_rejected(
+    dispatcher: Dispatcher, telegram_bot: Bot, db: Database
+):
+    await db.ensure_profile(USER)
+
+    await dispatcher.feed_raw_update(telegram_bot, callback_update("cfg:daily:03:33"))
+
+    profile = await db.get_profile(USER)
+    assert profile is not None and profile.daily_time is None
+
+
+async def test_voice_only_toggle(
+    dispatcher: Dispatcher, telegram_bot: Bot, db: Database
+):
+    await db.ensure_profile(USER)
+
+    await dispatcher.feed_raw_update(telegram_bot, callback_update("cfg:voiceonly"))
+
+    profile = await db.get_profile(USER)
+    assert profile is not None and profile.voice_only is True
+
+
+async def test_current_turn_is_marked_for_the_model(
+    dispatcher: Dispatcher, telegram_bot: Bot
+):
+    """История приходит без исправлений — текущая реплика должна быть отмечена."""
+    await dispatcher.feed_raw_update(telegram_bot, text_update("I go to Rome"))
+
+    turn = dispatcher["_teacher"].calls[0]["turn"]
+    assert "correct only this one" in turn
+    assert turn.endswith("I go to Rome")

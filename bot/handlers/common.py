@@ -79,7 +79,7 @@ async def cmd_start(message: Message, db: Database, state: FSMContext) -> None:
 
 
 async def set_level(callback: CallbackQuery, db: Database, state: FSMContext) -> None:
-    level = (callback.data or "").split(":", 1)[1]
+    level = _payload(callback.data, kb.ONBOARD_LEVEL)
     if level not in kb.LEVELS:
         await callback.answer("Неизвестный уровень")
         return
@@ -130,8 +130,18 @@ async def cfg_level(callback: CallbackQuery, db: Database) -> None:
     await callback.answer()
 
 
+def _payload(data: str | None, prefix: str) -> str:
+    """Хвост callback_data после префикса.
+
+    Резать по последнему двоеточию нельзя: значение само бывает с ним —
+    например время «09:00».
+    """
+    data = data or ""
+    return data[len(prefix):] if data.startswith(prefix) else ""
+
+
 async def cfg_level_set(callback: CallbackQuery, db: Database) -> None:
-    level = (callback.data or "").rsplit(":", 1)[-1]
+    level = _payload(callback.data, kb.CFG_LEVEL_SET)
     if level not in kb.LEVELS:
         await callback.answer("Неизвестный уровень")
         return
@@ -170,7 +180,7 @@ async def cfg_daily(callback: CallbackQuery, db: Database) -> None:
 
 
 async def cfg_daily_set(callback: CallbackQuery, db: Database) -> None:
-    value = (callback.data or "").rsplit(":", 1)[-1]
+    value = _payload(callback.data, kb.CFG_DAILY_SET)
     await db.ensure_profile(callback.from_user.id)
     if value == "off":
         await db.update_profile(callback.from_user.id, daily_time=None)

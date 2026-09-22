@@ -17,7 +17,7 @@ from ..config import Config
 from ..db import Database
 from ..formatting import render_voice_too_long
 from ..llm import LLMError
-from ..prompts import build_topic_turn, build_voice_turn
+from ..prompts import build_text_turn, build_topic_turn, build_voice_turn
 from ..service import TeacherService
 from ..speech import SpeechError
 
@@ -164,7 +164,7 @@ async def on_text(message: Message, service: TeacherService) -> None:
     text = (message.text or "").strip()
     if not text:
         return
-    await _reply_turn(message, service, text, text)
+    await _reply_turn(message, service, build_text_turn(text), text)
 
 
 async def on_unknown_command(message: Message) -> None:

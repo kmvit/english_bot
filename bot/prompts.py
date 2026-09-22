@@ -24,6 +24,7 @@ TEACHER_SYSTEM = """You are a friendly, patient personal English tutor talking t
 2. Then report mistakes.
 
 # Corrections
+- Correct ONLY the student's most recent message — the last one in the conversation. Earlier messages were already handled in earlier turns: mistakes in them are history, not material for this turn, even though the corrections you gave are not shown back to you.
 - Correct only real errors: grammar, word choice, word form, unnatural collocations that a native speaker would not say.
 - Never rewrite for style, register or elegance. If a sentence is correct but simple, leave it alone.
 - At most 3 corrections per turn — pick the ones that matter most for being understood.
@@ -134,20 +135,26 @@ def _profile_block(
     return "\n".join(lines)
 
 
+# История приходит модели без блоков исправлений — в ней остаются только
+# разговорные реплики. Чтобы модель не решила «наверстать» старые ошибки,
+# текущий ход помечается явно.
+CURRENT_TURN_MARK = "[new message — correct only this one]"
+
+
 def build_voice_turn(assessment: Assessment) -> str:
     """Ход пользователя для голосового: транскрипт + компактный отчёт Azure."""
     report = json.dumps(
         assessment.to_compact_dict(), ensure_ascii=False, sort_keys=True
     )
     return (
-        "The student sent a voice message.\n"
+        f"{CURRENT_TURN_MARK} The student sent a voice message.\n"
         f'Transcript: "{assessment.transcript}"\n'
         f"Pronunciation report (JSON, scores 0-100): {report}"
     )
 
 
 def build_text_turn(text: str) -> str:
-    return text
+    return f"{CURRENT_TURN_MARK}\n{text}"
 
 
 def build_daily_turn(
