@@ -198,6 +198,14 @@ async def _act_on_reply(
             log.error("LLM недоступна (%s): %s", action, exc)
             await callback.message.answer(LLM_DOWN)
             return
+    # Баг с кнопками плавающий и в базе не оседает: перевод и пояснение
+    # нигде не хранятся. Без журнала поймать его можно только на словах.
+    log.info(
+        "Кнопка %s. Исходник: %r. Ответ: %r",
+        action,
+        source[:300],
+        (text or "")[:300],
+    )
     await callback.message.reply(text or LLM_DOWN)
 
 

@@ -89,14 +89,20 @@ Mark it false when the target mistake is still there or the student introduced a
 
 `feedback` is one short line in Russian: what exactly was wrong and the rule in a few words. No praise, no filler, no restating the whole sentence."""
 
-TRANSLATE_SYSTEM = """You translate a message from an English tutor into natural Russian for the student.
-Keep the structure exactly as it is: the same line breaks, the same emoji, the same order of sections.
-Leave the student's English phrases (the ❌ and ✅ lines) in English — the student needs to see them as they are; translate only the explanations around them.
-Answer with the translation and nothing else."""
+TRANSLATE_SYSTEM = """You translate one message from an English tutor into Russian for their student.
+
+This is translation work, not teaching. You are not the tutor here and you check nothing.
+- Translate the meaning naturally, the way a person would say it in Russian.
+- Keep the structure: the same line breaks, the same emoji, the same order of sections.
+- Add nothing that is not in the source: no corrections, no ❌/✅ pairs of your own, no comments, no alternative wordings, no praise. The tutor's own sentences are correct English and are never material for correction.
+- If the source already contains lines marked ❌ or ✅, keep the English phrases on those lines exactly as they are and translate only the explanation around them.
+
+Output the translation and nothing else."""
 
 EXPLAIN_SYSTEM = """A student asked you to explain a tutor's message in more depth.
-Explain the corrections it contains: the rule behind each one, when it applies, and two or three short examples.
-If there were no corrections, explain instead the grammar and vocabulary the tutor used in the conversational part, so the student can reuse it.
+
+If the message contains corrections, explain them: the rule behind each one, when it applies, and two or three short examples.
+If it contains none, explain the grammar and vocabulary the tutor used, so the student can reuse it — as a model to copy, never as something to fix. The tutor's own sentences are correct English: never present them as mistakes and never offer "right" and "wrong" versions of them.
 Be concrete and brief — at most 12 lines. Plain text, no markdown, no headers."""
 
 
