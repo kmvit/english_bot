@@ -8,7 +8,7 @@ from aiogram.types import Message
 from ..config import Config
 from ..costs import LLM, STT, TTS, format_usd
 from ..db import Database, month_start
-from ..formatting import render_mistakes, render_progress
+from ..formatting import render_mistakes, render_progress, render_words
 from ..service import TeacherService
 
 KIND_RU = {
@@ -26,11 +26,22 @@ async def cmd_mistakes(message: Message, db: Database) -> None:
 async def cmd_progress(
     message: Message, db: Database, service: TeacherService
 ) -> None:
-    week = await db.pronunciation_progress(message.from_user.id, days=7)
-    month = await db.pronunciation_progress(message.from_user.id, days=30)
+    user_id = message.from_user.id
     await message.answer(
-        render_progress(week, month, service.assesses_pronunciation)
+        render_progress(
+            week=await db.pronunciation_progress(user_id, days=7),
+            month=await db.pronunciation_progress(user_id, days=30),
+            week_fluency=await db.fluency_progress(user_id, days=7),
+            month_fluency=await db.fluency_progress(user_id, days=30),
+            pronunciation_enabled=service.assesses_pronunciation,
+        )
     )
+
+
+async def cmd_words(message: Message, db: Database) -> None:
+    user_id = message.from_user.id
+    words = await db.recent_words(user_id, limit=20)
+    await message.answer(render_words(words, await db.words_total(user_id)))
 
 
 async def cmd_cost(message: Message, db: Database, config: Config) -> None:
@@ -66,5 +77,6 @@ def build() -> Router:
     router = Router(name="stats")
     router.message.register(cmd_mistakes, Command("mistakes"))
     router.message.register(cmd_progress, Command("progress"))
+    router.message.register(cmd_words, Command("words"))
     router.message.register(cmd_cost, Command("cost"))
     return router

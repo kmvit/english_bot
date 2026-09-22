@@ -95,3 +95,41 @@ def test_progress_week_empty_month_present():
 def test_voice_too_long_message():
     text = render_voice_too_long(95, 60)
     assert "95" in text and "60" in text
+
+
+def test_progress_shows_fluency_without_pronunciation_scores():
+    from bot.db import FluencyStat
+
+    week = ProgressStat(2, None, None, None, None)
+    month = ProgressStat(5, None, None, None, None)
+    text = render_progress(
+        week,
+        month,
+        week_fluency=FluencyStat(2, 118.0, 2.5, 0.12),
+        month_fluency=FluencyStat(5, 104.0, 4.0, 0.2),
+        pronunciation_enabled=False,
+    )
+
+    assert "118 слов/мин" in text
+    assert "2.5 за запись" in text and "12% времени" in text
+    assert "▲" in text          # темп за неделю выше месячного
+    assert "Баллы произношения" in text
+    assert "общий" not in text  # баллов нет — строк с ними быть не должно
+
+
+def test_words_rendering():
+    from bot.db import VocabWord
+    from bot.formatting import render_words
+
+    words = [VocabWord("commute", "поездка на работу", "My commute is long.", 2, "2026-01-01")]
+    text = render_words(words, total=7)
+
+    assert "7 слов" in text
+    assert "commute" in text and "поездка на работу" in text
+    assert "My commute is long." in text
+
+
+def test_words_empty():
+    from bot.formatting import render_words
+
+    assert "Словарь пока пуст" in render_words([], 0)

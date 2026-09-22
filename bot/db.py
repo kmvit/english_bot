@@ -56,6 +56,19 @@ CREATE TABLE IF NOT EXISTS pronunciation (
 );
 CREATE INDEX IF NOT EXISTS idx_pron_user_date ON pronunciation(user_id, created_at);
 
+CREATE TABLE IF NOT EXISTS vocabulary (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id    INTEGER NOT NULL,
+    word       TEXT NOT NULL,
+    norm_word  TEXT NOT NULL,
+    meaning    TEXT,
+    example    TEXT,
+    added_at   TEXT NOT NULL,
+    last_seen  TEXT,
+    seen_count INTEGER NOT NULL DEFAULT 0,
+    UNIQUE(user_id, norm_word)
+);
+
 CREATE TABLE IF NOT EXISTS usage_log (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id       INTEGER NOT NULL,
@@ -72,6 +85,26 @@ CREATE TABLE IF NOT EXISTS usage_log (
 );
 CREATE INDEX IF NOT EXISTS idx_usage_user_date ON usage_log(user_id, created_at);
 """
+
+
+# Интервалы повторения в днях по длине серии верных ответов: ошибся — завтра,
+# дальше всё реже. Последнее значение держится для давно закрытых ошибок.
+DRILL_INTERVALS = (1, 2, 4, 9, 21)
+
+# Столбцы, появившиеся после первого запуска. Пересоздавать таблицы нельзя —
+# в базе живой прогресс ученика, поэтому недостающее добавляется на месте.
+MIGRATIONS: tuple[tuple[str, str, str], ...] = (
+    ("profile", "daily_time", "TEXT"),
+    ("profile", "daily_last_sent", "TEXT"),
+    ("profile", "weekly_last_sent", "TEXT"),
+    ("profile", "voice_only", "INTEGER NOT NULL DEFAULT 0"),
+    ("errors", "drill_due", "TEXT"),
+    ("errors", "drill_streak", "INTEGER NOT NULL DEFAULT 0"),
+    ("pronunciation", "words", "INTEGER"),
+    ("pronunciation", "wpm", "REAL"),
+    ("pronunciation", "pauses", "INTEGER"),
+    ("pronunciation", "pause_ratio", "REAL"),
+)
 
 
 def utc_now() -> datetime:
@@ -93,8 +126,14 @@ class Profile:
     interests: str | None = None
     native_language: str = "ru"
     voice_replies: bool = True
+    #: Только голос: разговорная часть уходит голосовым, без дублирования текстом.
+    voice_only: bool = False
     messages_total: int = 0
     level_checked_at_message: int = 0
+    #: Время ежедневного вопроса в местном часовом поясе, "HH:MM" или None.
+    daily_time: str | None = None
+    daily_last_sent: str | None = None
+    weekly_last_sent: str | None = None
 
     @property
     def is_onboarded(self) -> bool:
@@ -108,6 +147,28 @@ class ErrorStat:
     example: str | None
     count: int
     last_seen: str
+    id: int = 0
+    #: Когда ошибку пора повторить; None — ещё ни разу не тренировали.
+    drill_due: str | None = None
+    #: Сколько раз подряд ученик справился. Чем больше, тем реже повтор.
+    drill_streak: int = 0
+
+
+@dataclass
+class VocabWord:
+    word: str
+    meaning: str | None
+    example: str | None
+    seen_count: int
+    added_at: str
+
+
+@dataclass
+class FluencyStat:
+    samples: int
+    wpm: float | None
+    pauses: float | None
+    pause_ratio: float | None
 
 
 @dataclass
@@ -133,7 +194,17 @@ class Database:
         await self._conn.execute("PRAGMA journal_mode=WAL")
         await self._conn.execute("PRAGMA foreign_keys=ON")
         await self._conn.executescript(SCHEMA)
+        await self._migrate()
         await self._conn.commit()
+
+    async def _migrate(self) -> None:
+        for table, column, ddl in MIGRATIONS:
+            async with self.conn.execute(f"PRAGMA table_info({table})") as cursor:
+                existing = {row["name"] for row in await cursor.fetchall()}
+            if column not in existing:
+                await self.conn.execute(
+                    f"ALTER TABLE {table} ADD COLUMN {column} {ddl}"
+                )
 
     async def close(self) -> None:
         if self._conn is not None:
@@ -173,8 +244,12 @@ class Database:
             interests=row["interests"],
             native_language=row["native_language"],
             voice_replies=bool(row["voice_replies"]),
+            voice_only=bool(row["voice_only"]),
             messages_total=row["messages_total"],
             level_checked_at_message=row["level_checked_at_message"],
+            daily_time=row["daily_time"],
+            daily_last_sent=row["daily_last_sent"],
+            weekly_last_sent=row["weekly_last_sent"],
         )
 
     async def update_profile(self, user_id: int, **fields: Any) -> None:
@@ -183,14 +258,19 @@ class Database:
             "interests",
             "native_language",
             "voice_replies",
+            "voice_only",
             "messages_total",
             "level_checked_at_message",
+            "daily_time",
+            "daily_last_sent",
+            "weekly_last_sent",
         }
         updates = {k: v for k, v in fields.items() if k in allowed}
         if not updates:
             return
-        if "voice_replies" in updates:
-            updates["voice_replies"] = int(bool(updates["voice_replies"]))
+        for flag in ("voice_replies", "voice_only"):
+            if flag in updates:
+                updates[flag] = int(bool(updates[flag]))
         assignments = ", ".join(f"{key} = ?" for key in updates)
         await self.conn.execute(
             f"UPDATE profile SET {assignments}, updated_at = ? WHERE user_id = ?",
@@ -271,33 +351,71 @@ class Database:
         )
         await self.conn.commit()
 
+    @staticmethod
+    def _error_stat(row: Any) -> ErrorStat:
+        return ErrorStat(
+            id=row["id"],
+            type=row["type"],
+            description=row["description"],
+            example=row["example"],
+            count=row["count"],
+            last_seen=row["last_seen"],
+            drill_due=row["drill_due"],
+            drill_streak=row["drill_streak"] or 0,
+        )
+
     async def top_errors(self, user_id: int, limit: int = 5) -> list[ErrorStat]:
         async with self.conn.execute(
-            "SELECT type, description, example, count, last_seen FROM errors "
-            "WHERE user_id = ? ORDER BY count DESC, last_seen DESC LIMIT ?",
+            "SELECT * FROM errors WHERE user_id = ? "
+            "ORDER BY count DESC, last_seen DESC LIMIT ?",
             (user_id, limit),
         ) as cursor:
             rows = await cursor.fetchall()
-        return [
-            ErrorStat(
-                type=row["type"],
-                description=row["description"],
-                example=row["example"],
-                count=row["count"],
-                last_seen=row["last_seen"],
-            )
-            for row in rows
-        ]
+        return [self._error_stat(row) for row in rows]
+
+    async def errors_due_for_drill(self, user_id: int, limit: int = 3) -> list[ErrorStat]:
+        """Ошибки, которые пора повторить: ни разу не тренированные или отлежавшие срок."""
+        now = _ts()
+        async with self.conn.execute(
+            "SELECT * FROM errors WHERE user_id = ? "
+            "AND (drill_due IS NULL OR drill_due <= ?) "
+            "ORDER BY drill_streak ASC, count DESC, last_seen DESC LIMIT ?",
+            (user_id, now, limit),
+        ) as cursor:
+            rows = await cursor.fetchall()
+        return [self._error_stat(row) for row in rows]
+
+    async def record_drill_result(self, error_id: int, correct: bool) -> None:
+        """Интервальное повторение: справился — следующий раз нескоро, нет — завтра."""
+        async with self.conn.execute(
+            "SELECT drill_streak FROM errors WHERE id = ?", (error_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+        if row is None:
+            return
+        streak = (row["drill_streak"] or 0) + 1 if correct else 0
+        due = utc_now() + timedelta(days=DRILL_INTERVALS[min(streak, len(DRILL_INTERVALS) - 1)])
+        await self.conn.execute(
+            "UPDATE errors SET drill_streak = ?, drill_due = ? WHERE id = ?",
+            (streak, _ts(due), error_id),
+        )
+        await self.conn.commit()
 
     # --- произношение --------------------------------------------------
 
     async def add_pronunciation(
-        self, user_id: int, scores: dict[str, float], duration_sec: float
+        self,
+        user_id: int,
+        scores: dict[str, float],
+        duration_sec: float,
+        fluency: dict[str, float] | None = None,
     ) -> None:
+        fluency = fluency or {}
         await self.conn.execute(
             "INSERT INTO pronunciation "
-            "(user_id, accuracy, fluency, prosody, completeness, overall, duration_sec, created_at) "
-            "VALUES (?,?,?,?,?,?,?,?)",
+            "(user_id, accuracy, fluency, prosody, completeness, overall, duration_sec, "
+            "words, wpm, pauses, pause_ratio, created_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 user_id,
                 scores.get("accuracy"),
@@ -306,10 +424,33 @@ class Database:
                 scores.get("completeness"),
                 scores.get("overall"),
                 duration_sec,
+                fluency.get("words"),
+                fluency.get("wpm"),
+                fluency.get("pauses"),
+                fluency.get("pause_ratio"),
                 _ts(),
             ),
         )
         await self.conn.commit()
+
+    async def fluency_progress(self, user_id: int, days: int) -> FluencyStat:
+        """Темп речи и паузы за период: считаются локально, без облачных оценок."""
+        cutoff = _ts(utc_now() - timedelta(days=days))
+        async with self.conn.execute(
+            "SELECT COUNT(wpm) AS n, AVG(wpm) AS wpm, AVG(pauses) AS pauses, "
+            "AVG(pause_ratio) AS pause_ratio FROM pronunciation "
+            "WHERE user_id = ? AND created_at >= ? AND wpm IS NOT NULL",
+            (user_id, cutoff),
+        ) as cursor:
+            row = await cursor.fetchone()
+        if row is None or not row["n"]:
+            return FluencyStat(0, None, None, None)
+        return FluencyStat(
+            samples=int(row["n"]),
+            wpm=row["wpm"],
+            pauses=row["pauses"],
+            pause_ratio=row["pause_ratio"],
+        )
 
     async def pronunciation_progress(self, user_id: int, days: int) -> ProgressStat:
         cutoff = _ts(utc_now() - timedelta(days=days))
@@ -329,6 +470,68 @@ class Database:
             prosody=row["prosody"],
             overall=row["overall"],
         )
+
+    # --- словарь --------------------------------------------------------
+
+    async def add_words(
+        self, user_id: int, words: Iterable[tuple[str, str, str]]
+    ) -> None:
+        """Слова, которые учитель ввёл в разговоре. Повтор не плодит дубликаты."""
+        now = _ts()
+        rows = [
+            (user_id, word.strip(), _norm_key(word), meaning, example, now)
+            for word, meaning, example in words
+            if word.strip()
+        ]
+        if not rows:
+            return
+        await self.conn.executemany(
+            "INSERT INTO vocabulary (user_id, word, norm_word, meaning, example, added_at) "
+            "VALUES (?,?,?,?,?,?) "
+            "ON CONFLICT(user_id, norm_word) DO UPDATE SET "
+            "meaning = COALESCE(excluded.meaning, vocabulary.meaning), "
+            "example = COALESCE(excluded.example, vocabulary.example)",
+            rows,
+        )
+        await self.conn.commit()
+
+    async def mark_words_seen(self, user_id: int, words: Iterable[str]) -> None:
+        """Ученик снова встретил слово — отмечаем, чтобы не подсовывать без нужды."""
+        keys = [_norm_key(word) for word in words if word.strip()]
+        if not keys:
+            return
+        now = _ts()
+        await self.conn.executemany(
+            "UPDATE vocabulary SET seen_count = seen_count + 1, last_seen = ? "
+            "WHERE user_id = ? AND norm_word = ?",
+            [(now, user_id, key) for key in keys],
+        )
+        await self.conn.commit()
+
+    async def recent_words(self, user_id: int, limit: int = 20) -> list[VocabWord]:
+        async with self.conn.execute(
+            "SELECT word, meaning, example, seen_count, added_at FROM vocabulary "
+            "WHERE user_id = ? ORDER BY id DESC LIMIT ?",
+            (user_id, limit),
+        ) as cursor:
+            rows = await cursor.fetchall()
+        return [
+            VocabWord(
+                word=row["word"],
+                meaning=row["meaning"],
+                example=row["example"],
+                seen_count=row["seen_count"],
+                added_at=row["added_at"],
+            )
+            for row in rows
+        ]
+
+    async def words_total(self, user_id: int) -> int:
+        async with self.conn.execute(
+            "SELECT COUNT(*) AS n FROM vocabulary WHERE user_id = ?", (user_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+        return int(row["n"]) if row else 0
 
     # --- расходы -------------------------------------------------------
 

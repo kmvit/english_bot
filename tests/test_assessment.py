@@ -209,3 +209,52 @@ def test_non_numeric_scores_are_skipped():
     result = compact_assessment([weird])
     assert result.scores == {"fluency": 70.0}
     assert [p["p"] for p in result.worst_words[0].phonemes] == ["eh"]
+
+
+# --- беглость по таймингам слов ---
+
+
+def test_fluency_basic_metrics():
+    # Пять слов за 10 секунд, одна пауза в 2 секунды между 3-м и 4-м.
+    words = [
+        ("I", 0.0, 0.3),
+        ("went", 0.35, 0.8),
+        ("there", 0.85, 1.2),
+        ("yesterday", 3.2, 4.0),
+        ("morning", 4.05, 4.6),
+    ]
+    from bot.assessment import compute_fluency
+
+    fluency = compute_fluency(words, duration_sec=10.0)
+
+    assert fluency["words"] == 5
+    assert fluency["wpm"] == pytest.approx(30.0)      # 5 слов за 10 с
+    assert fluency["pauses"] == 1                      # только разрыв в 2 с
+    assert fluency["pause_ratio"] == pytest.approx(0.2, abs=0.01)
+
+
+def test_short_gaps_are_not_pauses():
+    from bot.assessment import compute_fluency
+
+    words = [(f"w{i}", i * 0.5, i * 0.5 + 0.3) for i in range(6)]
+    fluency = compute_fluency(words, duration_sec=3.0)
+
+    assert fluency["pauses"] == 0
+    assert fluency["pause_ratio"] == 0.0
+
+
+def test_fluency_without_words():
+    from bot.assessment import compute_fluency
+
+    assert compute_fluency([], 10.0) == {}
+    assert compute_fluency([("hi", None, None)], 10.0) == {}
+
+
+def test_fluency_uses_speech_span_when_duration_unknown():
+    """Если длительность не передали, берём промежуток от первого слова до последнего."""
+    from bot.assessment import compute_fluency
+
+    words = [("one", 0.0, 0.5), ("two", 5.5, 6.0)]
+    fluency = compute_fluency(words, duration_sec=0.0)
+
+    assert fluency["wpm"] == pytest.approx(20.0)  # 2 слова за 6 с

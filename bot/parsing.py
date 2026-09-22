@@ -62,8 +62,22 @@ REPLY_SCHEMA: dict[str, Any] = {
                 "additionalProperties": False,
             },
         },
+        "new_words": {
+            "type": "array",
+            "description": "Слова, которые учитель ввёл в этой реплике впервые.",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "word": {"type": "string"},
+                    "meaning": {"type": "string"},
+                    "example": {"type": "string"},
+                },
+                "required": ["word", "meaning", "example"],
+                "additionalProperties": False,
+            },
+        },
     },
-    "required": ["reply", "corrections", "pronunciation", "new_errors"],
+    "required": ["reply", "corrections", "pronunciation", "new_errors", "new_words"],
     "additionalProperties": False,
 }
 
@@ -81,6 +95,11 @@ _PRONUNCIATION_ALIASES = {
 _ERROR_ALIASES = {
     "type": ("type", "kind", "category"),
     "description": ("description", "text", "detail", "note"),
+}
+_WORD_ALIASES = {
+    "word": ("word", "term", "lexeme"),
+    "meaning": ("meaning", "translation", "definition", "gloss"),
+    "example": ("example", "sample", "sentence"),
 }
 
 VALID_ERROR_TYPES = ("grammar", "vocabulary", "pronunciation")
@@ -108,11 +127,19 @@ class LoggedError:
 
 
 @dataclass
+class NewWord:
+    word: str
+    meaning: str = ""
+    example: str = ""
+
+
+@dataclass
 class TeacherReply:
     reply: str
     corrections: list[Correction] = field(default_factory=list)
     pronunciation: list[PronunciationTip] = field(default_factory=list)
     new_errors: list[LoggedError] = field(default_factory=list)
+    new_words: list[NewWord] = field(default_factory=list)
     raw_json_ok: bool = True
 
 
@@ -245,11 +272,25 @@ def parse_teacher_reply(text: str) -> TeacherReply:
             error_type = "grammar"
         new_errors.append(LoggedError(type=error_type, description=description))
 
+    new_words = []
+    for item in _items(payload, "new_words"):
+        word = _pick(item, _WORD_ALIASES["word"])
+        if not word:
+            continue
+        new_words.append(
+            NewWord(
+                word=word,
+                meaning=_pick(item, _WORD_ALIASES["meaning"]),
+                example=_pick(item, _WORD_ALIASES["example"]),
+            )
+        )
+
     return TeacherReply(
         reply=reply.strip(),
         corrections=corrections,
         pronunciation=pronunciation,
         new_errors=new_errors,
+        new_words=new_words,
         raw_json_ok=True,
     )
 

@@ -270,3 +270,68 @@ async def test_local_tts_is_free(config: Config, db: Database, tmp_path, monkeyp
     rows = {row["kind"]: row for row in await db.usage_since(USER, month_start())}
     assert rows[TTS]["chars"] == 5
     assert rows[TTS]["cost"] == 0.0
+
+
+# --- словарь и беглость в ходе диалога ---
+
+
+async def test_new_words_are_saved(config: Config, db: Database):
+    from bot.parsing import NewWord
+
+    reply = TeacherReply(
+        reply="ok",
+        new_words=[NewWord("commute", "поездка на работу", "My commute takes an hour.")],
+    )
+    service = TeacherService(config, db, FakeTeacher(reply), FakeSpeech())
+
+    await service.handle_turn(USER, "turn", "turn")
+
+    words = await db.recent_words(USER)
+    assert [w.word for w in words] == ["commute"]
+    assert words[0].meaning == "поездка на работу"
+
+
+async def test_known_words_are_given_to_the_model(config: Config, db: Database):
+    teacher = FakeTeacher()
+    service = TeacherService(config, db, teacher, FakeSpeech())
+    await db.ensure_profile(USER)
+    await db.add_words(USER, [("commute", "поездка", "example")])
+
+    await service.handle_turn(USER, "turn", "turn")
+
+    assert teacher.calls[0]["known_words"] == ["commute"]
+
+
+async def test_word_used_by_student_is_counted(config: Config, db: Database):
+    service = TeacherService(config, db, FakeTeacher(), FakeSpeech())
+    await db.ensure_profile(USER)
+    await db.add_words(USER, [("commute", "поездка", "example")])
+
+    await service.handle_turn(USER, "turn", "My commute was long today")
+
+    assert (await db.recent_words(USER))[0].seen_count == 1
+
+
+async def test_word_inside_another_word_does_not_count(config: Config, db: Database):
+    service = TeacherService(config, db, FakeTeacher(), FakeSpeech())
+    await db.ensure_profile(USER)
+    await db.add_words(USER, [("art", "искусство", "example")])
+
+    await service.handle_turn(USER, "turn", "I started learning")  # "started" содержит "art"
+
+    assert (await db.recent_words(USER))[0].seen_count == 0
+
+
+async def test_fluency_is_stored_without_pronunciation_scores(config: Config, db: Database):
+    assessment = Assessment(
+        transcript="I went there",
+        duration_sec=10.0,
+        fluency={"words": 3.0, "wpm": 18.0, "pauses": 1.0, "pause_ratio": 0.2},
+    )
+    service = TeacherService(config, db, FakeTeacher(), FakeSpeech())
+
+    await service.handle_turn(USER, "turn", assessment.transcript, assessment)
+
+    stat = await db.fluency_progress(USER, days=7)
+    assert stat.samples == 1
+    assert stat.wpm == 18.0

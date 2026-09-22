@@ -162,3 +162,96 @@ async def test_users_are_isolated(db: Database):
 
     assert await db.get_history(2, 10) == []
     assert await db.top_errors(2) == []
+
+
+# --- словарь ---
+
+
+async def test_words_are_saved_without_duplicates(db: Database):
+    await db.ensure_profile(USER)
+    await db.add_words(USER, [("resilient", "стойкий", "She is resilient.")])
+    await db.add_words(USER, [("Resilient", "стойкий", "Another example.")])
+    await db.add_words(USER, [("commute", "поездка на работу", "My commute is long.")])
+
+    words = await db.recent_words(USER)
+    assert await db.words_total(USER) == 2
+    assert {w.word for w in words} == {"resilient", "commute"}
+
+
+async def test_empty_words_are_skipped(db: Database):
+    await db.ensure_profile(USER)
+    await db.add_words(USER, [("   ", "", "")])
+    assert await db.words_total(USER) == 0
+
+
+async def test_seen_counter_grows(db: Database):
+    await db.ensure_profile(USER)
+    await db.add_words(USER, [("commute", "поездка", "example")])
+
+    await db.mark_words_seen(USER, ["commute"])
+    await db.mark_words_seen(USER, ["Commute"])
+
+    assert (await db.recent_words(USER))[0].seen_count == 2
+
+
+# --- тренировка ошибок ---
+
+
+async def test_untrained_errors_are_due(db: Database):
+    await db.ensure_profile(USER)
+    await db.record_errors(USER, [("grammar", "артикли"), ("vocabulary", "make/do")])
+
+    due = await db.errors_due_for_drill(USER)
+    assert {e.description for e in due} == {"артикли", "make/do"}
+    assert all(e.drill_streak == 0 for e in due)
+
+
+async def test_correct_answer_postpones_the_error(db: Database):
+    await db.ensure_profile(USER)
+    await db.record_errors(USER, [("grammar", "артикли")])
+    error = (await db.top_errors(USER))[0]
+
+    await db.record_drill_result(error.id, correct=True)
+
+    assert await db.errors_due_for_drill(USER) == []
+    updated = (await db.top_errors(USER))[0]
+    assert updated.drill_streak == 1
+    assert updated.drill_due is not None
+
+
+async def test_wrong_answer_resets_streak(db: Database):
+    await db.ensure_profile(USER)
+    await db.record_errors(USER, [("grammar", "артикли")])
+    error = (await db.top_errors(USER))[0]
+
+    await db.record_drill_result(error.id, correct=True)
+    await db.record_drill_result(error.id, correct=True)
+    await db.record_drill_result(error.id, correct=False)
+
+    assert (await db.top_errors(USER))[0].drill_streak == 0
+
+
+async def test_drill_result_for_missing_error_is_ignored(db: Database):
+    await db.ensure_profile(USER)
+    await db.record_drill_result(9999, correct=True)  # не должно бросить
+
+
+# --- беглость ---
+
+
+async def test_fluency_progress(db: Database):
+    await db.ensure_profile(USER)
+    await db.add_pronunciation(USER, {}, 10.0, {"words": 20, "wpm": 100.0, "pauses": 2, "pause_ratio": 0.1})
+    await db.add_pronunciation(USER, {}, 10.0, {"words": 30, "wpm": 140.0, "pauses": 4, "pause_ratio": 0.2})
+
+    stat = await db.fluency_progress(USER, days=7)
+    assert stat.samples == 2
+    assert stat.wpm == 120.0
+    assert stat.pauses == 3.0
+
+
+async def test_fluency_ignores_records_without_metrics(db: Database):
+    await db.ensure_profile(USER)
+    await db.add_pronunciation(USER, {"overall": 70.0}, 5.0)
+
+    assert (await db.fluency_progress(USER, days=7)).samples == 0

@@ -87,9 +87,10 @@ class Teacher:
         recurring_errors: Sequence[ErrorStat],
         history: Sequence[dict[str, str]],
         user_turn: str,
+        known_words: Sequence[str] = (),
     ) -> LLMResult:
         messages = [
-            *build_system_messages(profile, recurring_errors),
+            *build_system_messages(profile, recurring_errors, known_words),
             *history,
             {"role": "user", "content": user_turn},
         ]

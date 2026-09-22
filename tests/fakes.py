@@ -22,13 +22,14 @@ class FakeTeacher:
         self.plain_value = "готовый текст от модели"
         self.fail = False
 
-    async def reply(self, profile, recurring_errors, history, user_turn):
+    async def reply(self, profile, recurring_errors, history, user_turn, known_words=()):
         self.calls.append(
             {
                 "profile": profile,
                 "recurring": list(recurring_errors),
                 "history": list(history),
                 "turn": user_turn,
+                "known_words": list(known_words),
             }
         )
         if self.fail:

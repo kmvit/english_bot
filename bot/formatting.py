@@ -4,7 +4,7 @@ from __future__ import annotations
 from html import escape
 from typing import Sequence
 
-from .db import ErrorStat, ProgressStat, Profile
+from .db import ErrorStat, FluencyStat, ProgressStat, Profile, VocabWord
 from .parsing import TeacherReply
 
 TELEGRAM_LIMIT = 4096
@@ -81,35 +81,80 @@ def _score_line(label: str, value: float | None) -> str:
 
 
 PRONUNCIATION_OFF = (
-    "Оценка произношения сейчас выключена: распознавание идёт локально через "
-    "Whisper, он даёт только текст. Баллы появятся, когда подключим Azure."
+    "<i>Баллы произношения по фонемам появятся, когда подключим Azure — "
+    "локальный Whisper их не даёт.</i>"
 )
 
 
-def render_progress(
-    week: ProgressStat, month: ProgressStat, pronunciation_enabled: bool = True
-) -> str:
-    if not pronunciation_enabled and not month.samples:
-        return PRONUNCIATION_OFF
-    if not month.samples:
-        return "Голосовых пока не было — пришли голосовое, и я начну считать баллы."
+def _fluency_lines(stat: FluencyStat) -> list[str]:
+    lines = []
+    if stat.wpm is not None:
+        lines.append(f"темп: {stat.wpm:.0f} слов/мин")
+    if stat.pauses is not None:
+        pause_part = f"паузы: {stat.pauses:.1f} за запись"
+        if stat.pause_ratio is not None:
+            pause_part += f" ({stat.pause_ratio * 100:.0f}% времени)"
+        lines.append(pause_part)
+    return lines
 
-    def block(title: str, stat: ProgressStat) -> str:
+
+def render_progress(
+    week: ProgressStat,
+    month: ProgressStat,
+    week_fluency: FluencyStat | None = None,
+    month_fluency: FluencyStat | None = None,
+    pronunciation_enabled: bool = True,
+) -> str:
+    if not month.samples:
+        text = "Голосовых пока не было — пришли голосовое, и я начну считать динамику."
+        return text if pronunciation_enabled else f"{text}\n\n{PRONUNCIATION_OFF}"
+
+    def block(title: str, stat: ProgressStat, fluency: FluencyStat | None) -> str:
         if not stat.samples:
             return f"<b>{title}</b>\nнет голосовых"
         lines = [f"<b>{title}</b> ({stat.samples} голосовых)"]
-        lines.append(_score_line("общий", stat.overall))
-        lines.append(_score_line("точность", stat.accuracy))
-        lines.append(_score_line("беглость", stat.fluency))
-        lines.append(_score_line("интонация", stat.prosody))
+        if fluency is not None:
+            lines.extend(_fluency_lines(fluency))
+        if pronunciation_enabled:
+            lines.append(_score_line("общий", stat.overall))
+            lines.append(_score_line("точность", stat.accuracy))
+            lines.append(_score_line("интонация", stat.prosody))
         return "\n".join(lines)
 
-    parts = [block("За 7 дней", week), block("За 30 дней", month)]
-    if week.samples and month.samples and week.overall and month.overall:
+    parts = [
+        block("За 7 дней", week, week_fluency),
+        block("За 30 дней", month, month_fluency),
+    ]
+
+    if pronunciation_enabled and week.overall and month.overall:
         delta = week.overall - month.overall
         arrow = "▲" if delta > 1 else ("▼" if delta < -1 else "▬")
         parts.append(f"{arrow} за неделю относительно месяца: {delta:+.0f}")
+    elif week_fluency and month_fluency and week_fluency.wpm and month_fluency.wpm:
+        delta = week_fluency.wpm - month_fluency.wpm
+        arrow = "▲" if delta > 3 else ("▼" if delta < -3 else "▬")
+        parts.append(f"{arrow} темп за неделю относительно месяца: {delta:+.0f} слов/мин")
+
+    if not pronunciation_enabled:
+        parts.append(PRONUNCIATION_OFF)
     return _truncate("\n\n".join(parts))
+
+
+def render_words(words: Sequence[VocabWord], total: int) -> str:
+    if not words:
+        return (
+            "Словарь пока пуст. Я добавляю сюда слова, которые ввожу в разговоре — "
+            "поговори со мной, и он начнёт наполняться."
+        )
+    lines = [f"<b>Твой словарь</b> — {total} слов, последние {len(words)}:"]
+    for word in words:
+        line = f"• <b>{_e(word.word)}</b>"
+        if word.meaning:
+            line += f" — {_e(word.meaning)}"
+        lines.append(line)
+        if word.example:
+            lines.append(f"   <i>{_e(word.example)}</i>")
+    return _truncate("\n".join(lines))
 
 
 def render_settings(profile: Profile) -> str:

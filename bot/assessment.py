@@ -17,6 +17,10 @@ PHONEME_SCORE_THRESHOLD = 70.0
 WORST_WORDS_LIMIT = 5
 PHONEMES_PER_WORD = 3
 
+# Пауза между словами, с которой она перестаёт быть естественной сцепкой речи
+# и становится заминкой. Ниже — обычные промежутки между слогами.
+PAUSE_THRESHOLD_SEC = 0.4
+
 _SCORE_KEYS = {
     "accuracy": "AccuracyScore",
     "fluency": "FluencyScore",
@@ -50,6 +54,8 @@ class Assessment:
     scores: dict[str, float] = field(default_factory=dict)
     worst_words: list[WordScore] = field(default_factory=list)
     duration_sec: float = 0.0
+    #: Темп и паузы. Считаются локально по таймингам слов, без облачных оценок.
+    fluency: dict[str, float] = field(default_factory=dict)
 
     @property
     def is_empty(self) -> bool:
@@ -213,3 +219,40 @@ def compact_assessment(
         worst_words=worst[:WORST_WORDS_LIMIT],
         duration_sec=round(float(duration_sec), 2),
     )
+
+
+def compute_fluency(
+    words: Sequence[tuple[str, float, float]], duration_sec: float
+) -> dict[str, float]:
+    """Темп речи и паузы по таймингам слов.
+
+    `words` — тройки (слово, начало, конец) в секундах. Это то немногое об
+    устной речи, что можно посчитать без облачной оценки произношения:
+    насколько быстро ученик говорит и как часто останавливается.
+    """
+    usable = [
+        (text, start, end)
+        for text, start, end in words
+        if isinstance(start, (int, float)) and isinstance(end, (int, float)) and end >= start
+    ]
+    if not usable:
+        return {}
+
+    span = max(duration_sec, usable[-1][2] - usable[0][1])
+    if span <= 0:
+        return {}
+
+    pauses = 0
+    pause_time = 0.0
+    for (_, _, prev_end), (_, start, _) in zip(usable, usable[1:]):
+        gap = start - prev_end
+        if gap > PAUSE_THRESHOLD_SEC:
+            pauses += 1
+            pause_time += gap
+
+    return {
+        "words": float(len(usable)),
+        "wpm": round(len(usable) / span * 60.0, 1),
+        "pauses": float(pauses),
+        "pause_ratio": round(min(pause_time / span, 1.0), 3),
+    }

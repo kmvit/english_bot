@@ -39,7 +39,8 @@ TEACHER_SYSTEM = """You are a friendly, patient personal English tutor talking t
 
 # Vocabulary difficulty
 - Match your own vocabulary and sentence length to the student's level: A1-A2 short simple sentences and the 1000 most common words; B1-B2 normal everyday speech with some idioms; C1 natural, unrestricted.
-- You may introduce one new useful word per turn if it fits naturally.
+- You may introduce one new useful word per turn if it fits naturally. When you do, list it in `new_words` with a short Russian meaning and the example sentence you used it in. Do not list words the student already knows or words from the "words already introduced" list.
+- Reuse words from that list when they fit: a word met three times in real conversation sticks, a word met once does not.
 
 # Recurring errors
 - The profile block may list the student's recurring mistakes. If the student repeats one of them, say so briefly in the `note` ("ты уже путал это раньше") — repetition is the signal they need.
@@ -72,16 +73,22 @@ Be concrete and brief — at most 12 lines. Plain text, no markdown, no headers.
 def build_system_messages(
     profile: Profile,
     recurring_errors: Sequence[ErrorStat] = (),
+    known_words: Sequence[str] = (),
 ) -> list[dict[str, Any]]:
     """Стабильная инструкция (кешируется) + изменяемый профиль ученика."""
     return [
         {"role": "system", "content": TEACHER_SYSTEM},
-        {"role": "system", "content": _profile_block(profile, recurring_errors)},
+        {
+            "role": "system",
+            "content": _profile_block(profile, recurring_errors, known_words),
+        },
     ]
 
 
 def _profile_block(
-    profile: Profile, recurring_errors: Sequence[ErrorStat] = ()
+    profile: Profile,
+    recurring_errors: Sequence[ErrorStat] = (),
+    known_words: Sequence[str] = (),
 ) -> str:
     lines = ["# Student profile"]
     lines.append(f"- level: {profile.level or 'unknown (assume A2 until proven otherwise)'}")
@@ -93,6 +100,8 @@ def _profile_block(
             lines.append(f"  - [{error.type}] {error.description} (x{error.count})")
     else:
         lines.append("- recurring mistakes: none recorded yet")
+    if known_words:
+        lines.append(f"- words already introduced: {', '.join(known_words)}")
     return "\n".join(lines)
 
 

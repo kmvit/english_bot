@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -18,7 +19,16 @@ from .audio import AudioError, to_ogg_opus
 
 log = logging.getLogger(__name__)
 
+
+def _mentions(text: str, word: str) -> bool:
+    """Слово встретилось в тексте как отдельное слово, а не частью другого."""
+    if not word:
+        return False
+    return re.search(rf"\b{re.escape(word)}\b", text, re.IGNORECASE) is not None
+
 LEVEL_CHECK_SAMPLE = 15
+#: Сколько ранее введённых слов показывать модели, чтобы она их переиспользовала.
+KNOWN_WORDS_IN_PROMPT = 25
 
 
 @dataclass
@@ -54,8 +64,11 @@ class TeacherService:
         profile = await self._db.ensure_profile(user_id)
         recurring = await self._db.top_errors(user_id, limit=5)
         history = await self._db.get_history(user_id, self._config.history_limit)
+        known = await self._db.recent_words(user_id, limit=KNOWN_WORDS_IN_PROMPT)
 
-        result = await self._teacher.reply(profile, recurring, history, llm_turn)
+        result = await self._teacher.reply(
+            profile, recurring, history, llm_turn, [w.word for w in known]
+        )
         await self._log_llm(user_id, result.usage, result.model)
 
         reply = result.reply
@@ -70,9 +83,25 @@ class TeacherService:
                 example=history_entry[:300],
             )
 
-        if assessment is not None and assessment.scores:
+        if reply.new_words:
+            await self._db.add_words(
+                user_id,
+                [(w.word, w.meaning, w.example) for w in reply.new_words],
+            )
+        # Слово, которое ученик употребил сам, засчитываем как встреченное:
+        # по этому счётчику видно, что прижилось, а что осталось в списке.
+        reused = [w.word for w in known if _mentions(history_entry, w.word)]
+        if reused:
+            await self._db.mark_words_seen(user_id, reused)
+
+        # Баллов произношения может не быть (локальный Whisper), а темп речи
+        # есть всегда — запись нужна и ради одной беглости.
+        if assessment is not None and (assessment.scores or assessment.fluency):
             await self._db.add_pronunciation(
-                user_id, assessment.scores, assessment.duration_sec
+                user_id,
+                assessment.scores,
+                assessment.duration_sec,
+                assessment.fluency,
             )
 
         total = await self._db.bump_messages_total(user_id)

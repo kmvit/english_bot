@@ -648,4 +648,4 @@ async def test_progress_explains_disabled_pronunciation(
 
     await dp.feed_raw_update(telegram_bot, text_update("/progress"))
 
-    assert "Оценка произношения сейчас выключена" in session.texts()[0]
+    assert "Баллы произношения по фонемам появятся" in session.texts()[0]
