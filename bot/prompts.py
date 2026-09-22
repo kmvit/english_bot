@@ -59,6 +59,15 @@ Weigh grammar range and accuracy, vocabulary, and sentence complexity. Judge onl
 Answer with exactly one token from: A1, A2, B1, B2, C1. No explanation."""
 
 
+DAILY_QUESTION_SYSTEM = """You open the day's conversation with an English learner, unprompted.
+
+Write ONE message: a greeting of at most four words, then a single question that invites a real answer, not yes or no. Rules:
+- English only, matched to the student's level.
+- Build on what they talked about recently when there is something to build on — refer to it specifically ("How did the trip to your parents go?"), not vaguely.
+- If there is nothing recent, ask about their interests or plans for the day.
+- Two sentences maximum. No emoji, no "I hope you are well", no explanation of why you are writing.
+- Never repeat a question that already appears in the recent messages."""
+
 DRILL_SYSTEM = """You write short error-correction exercises for one English learner, based on mistakes they actually made.
 
 For each mistake you are given, write exactly one sentence that contains that mistake and nothing else wrong. Rules:
@@ -139,6 +148,20 @@ def build_voice_turn(assessment: Assessment) -> str:
 
 def build_text_turn(text: str) -> str:
     return text
+
+
+def build_daily_turn(
+    level: str | None, interests: str | None, recent: Sequence[str]
+) -> str:
+    lines = [
+        f"Student level: {level or 'A2'}. Interests: {interests or 'unknown'}.",
+    ]
+    if recent:
+        lines.append("Recent messages from the student:")
+        lines.extend(f"- {m}" for m in recent)
+    else:
+        lines.append("No recent messages — this is a fresh start.")
+    return "\n".join(lines)
 
 
 def build_drill_turn(

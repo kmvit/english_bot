@@ -1,0 +1,10 @@
+[Unit]
+Description=Ежедневная резервная копия базы бота
+
+[Timer]
+OnCalendar=*-*-* 04:30:00
+# Если машина была выключена в назначенный час — сделать копию при старте.
+Persistent=true
+
+[Install]
+WantedBy=timers.target

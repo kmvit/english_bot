@@ -96,6 +96,12 @@ class Config:
     level_check_every: int = 50
     ffmpeg_bin: str = "ffmpeg"
     log_level: str = "INFO"
+    # Часовой пояс ученика: сервер может стоять где угодно, а «девять утра»
+    # означает девять утра у него.
+    timezone: str = "Europe/Moscow"
+    # День недели (0 — понедельник) и время недельной сводки.
+    weekly_weekday: int = 6
+    weekly_time: str = "19:00"
     # На части сетей маршрут IPv6 до Telegram не работает и polling виснет молча.
     telegram_force_ipv4: bool = False
     # SOCKS5/HTTP-прокси для Telegram и OpenRouter: на сервере в России оба
@@ -148,6 +154,9 @@ def load_config() -> Config:
         level_check_every=_int("LEVEL_CHECK_EVERY", 50),
         ffmpeg_bin=os.getenv("FFMPEG_BIN", "ffmpeg"),
         log_level=os.getenv("LOG_LEVEL", "INFO"),
+        timezone=os.getenv("TIMEZONE", "Europe/Moscow"),
+        weekly_weekday=_int("WEEKLY_WEEKDAY", 6),
+        weekly_time=os.getenv("WEEKLY_TIME", "19:00"),
         telegram_force_ipv4=_bool("TELEGRAM_FORCE_IPV4"),
         proxy_url=_opt("PROXY_URL"),
         prices=Prices(

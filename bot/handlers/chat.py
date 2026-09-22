@@ -14,6 +14,7 @@ from .. import keyboards as kb
 from ..assessment import Assessment
 from ..audio import AudioError, ogg_to_wav, wav_duration
 from ..config import Config
+from ..db import Database
 from ..formatting import render_voice_too_long
 from ..llm import LLMError
 from ..prompts import build_topic_turn, build_voice_turn
@@ -37,9 +38,14 @@ async def _reply_turn(
     llm_turn: str,
     history_entry: str,
     assessment: Assessment | None = None,
+    user_id: int | None = None,
 ) -> None:
-    """Спросить модель, отправить текст и (если включено) голосовой ответ."""
-    user_id = message.from_user.id
+    """Спросить модель, отправить текст и (если включено) голосовой ответ.
+
+    `user_id` нужен для ответов на нажатие кнопки: там `message` принадлежит
+    боту, и его `from_user` — сам бот, а не ученик.
+    """
+    user_id = user_id if user_id is not None else message.from_user.id
     async with ChatActionSender.typing(bot=message.bot, chat_id=message.chat.id):
         try:
             result = await service.handle_turn(
@@ -50,7 +56,8 @@ async def _reply_turn(
             await message.answer(LLM_DOWN)
             return
 
-    await message.answer(result.text, reply_markup=kb.reply_actions())
+    if result.text:
+        await message.answer(result.text, reply_markup=kb.reply_actions())
 
     if not (result.voice_enabled and result.spoken_text):
         return
@@ -65,16 +72,47 @@ async def _reply_turn(
             await message.answer_voice(FSInputFile(voice_path))
 
 
+async def _start_topic(
+    message: Message, service: TeacherService, topic: str, user_id: int | None = None
+) -> None:
+    await _reply_turn(
+        message,
+        service,
+        build_topic_turn(topic),
+        f"Let's talk about {topic}.",
+        user_id=user_id,
+    )
+
+
 async def cmd_topic(
-    message: Message, command: CommandObject, service: TeacherService
+    message: Message, command: CommandObject, service: TeacherService, db: Database
 ) -> None:
     topic = (command.args or "").strip()
-    if not topic:
-        await message.answer("Напиши тему: <code>/topic travel</code>")
+    if topic:
+        await _start_topic(message, service, topic)
         return
-    await _reply_turn(
-        message, service, build_topic_turn(topic), f"Let's talk about {topic}."
+    profile = await db.ensure_profile(message.from_user.id)
+    await message.answer(
+        "О чём поговорим? Выбери или просто напиши свою тему:",
+        reply_markup=kb.topic_suggestions(profile.interests),
     )
+
+
+async def btn_topic(message: Message, service: TeacherService, db: Database) -> None:
+    profile = await db.ensure_profile(message.from_user.id)
+    await message.answer(
+        "О чём поговорим? Выбери или просто напиши свою тему:",
+        reply_markup=kb.topic_suggestions(profile.interests),
+    )
+
+
+async def on_topic_pick(callback: CallbackQuery, service: TeacherService) -> None:
+    topic = (callback.data or "").split(":", 1)[1]
+    await callback.answer(topic)
+    if callback.message is None:
+        return
+    await callback.message.edit_text(f"Тема: <b>{topic}</b>")
+    await _start_topic(callback.message, service, topic, user_id=callback.from_user.id)
 
 
 async def on_voice(
@@ -175,6 +213,8 @@ def build() -> Router:
     router = Router(name="chat")
     router.callback_query.register(on_translate, F.data == kb.REPLY_TRANSLATE)
     router.callback_query.register(on_explain, F.data == kb.REPLY_EXPLAIN)
+    router.callback_query.register(on_topic_pick, F.data.startswith(kb.TOPIC_PICK))
+    router.message.register(btn_topic, F.text == kb.BTN_TOPIC)
     router.message.register(cmd_topic, Command("topic"))
     router.message.register(on_voice, F.voice)
     router.message.register(on_text, F.text & ~F.text.startswith("/"))

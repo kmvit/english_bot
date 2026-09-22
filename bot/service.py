@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+from datetime import timedelta
 from dataclasses import dataclass
 from typing import Any
 from pathlib import Path
@@ -11,9 +12,15 @@ from pathlib import Path
 from .assessment import Assessment
 from .config import Config
 from .costs import LLM, STT, TTS, TokenUsage, llm_cost, stt_cost, tts_cost
-from .db import Database
-from .formatting import render_reply
-from .prompts import EXPLAIN_SYSTEM, TRANSLATE_SYSTEM, build_explain_turn
+from .db import Database, utc_now
+from .formatting import render_reply, render_weekly_digest
+from .prompts import (
+    DAILY_QUESTION_SYSTEM,
+    EXPLAIN_SYSTEM,
+    TRANSLATE_SYSTEM,
+    build_daily_turn,
+    build_explain_turn,
+)
 from .llm import LLMError, Teacher
 from .speech import Speech, SpeechError
 from .audio import AudioError, to_ogg_opus
@@ -37,6 +44,8 @@ class TurnResult:
     text: str
     spoken_text: str
     voice_enabled: bool
+    #: Разговорная часть ушла в голосовое, текстом остались только исправления.
+    voice_only: bool = False
 
 
 class TeacherService:
@@ -108,10 +117,15 @@ class TeacherService:
         total = await self._db.bump_messages_total(user_id)
         self._maybe_schedule_level_check(user_id, profile.level_checked_at_message, total)
 
+        # Без работающей озвучки режим «только голос» оставил бы ученика
+        # вообще без ответа, поэтому он включается лишь вместе с ней.
+        voice_enabled = profile.voice_replies and self._speech.can_speak
+        voice_only = profile.voice_only and voice_enabled and bool(reply.reply)
         return TurnResult(
-            text=render_reply(reply),
+            text=render_reply(reply, include_conversation=not voice_only),
             spoken_text=reply.reply,
             voice_enabled=profile.voice_replies,
+            voice_only=voice_only,
         )
 
     async def _log_llm(self, user_id: int, usage: TokenUsage, model: str) -> None:
@@ -141,6 +155,39 @@ class TeacherService:
         )
         await self._log_llm(user_id, usage, model)
         return text
+
+    # --- инициатива бота -------------------------------------------------
+
+    async def daily_question(self, user_id: int) -> str:
+        """Сгенерировать утренний вопрос с опорой на последние разговоры."""
+        profile = await self._db.ensure_profile(user_id)
+        recent = await self._db.recent_topics(user_id, limit=6)
+        text, usage, model = await self._teacher.plain(
+            DAILY_QUESTION_SYSTEM,
+            build_daily_turn(profile.level, profile.interests, recent),
+            max_tokens=256,
+        )
+        await self._log_llm(user_id, usage, model)
+        text = text.strip()
+        if text:
+            # Вопрос — часть беседы: без записи в историю ответ ученика
+            # прилетит модели без контекста, на который он отвечает.
+            await self._db.add_message(user_id, "assistant", text)
+        return text
+
+    async def weekly_digest(self, user_id: int) -> str | None:
+        """Итоги недели. None — если заниматься было нечем, сводка бы только мешала."""
+        since = utc_now() - timedelta(days=7)
+        activity = await self._db.activity_since(user_id, since)
+        if not activity["messages"]:
+            return None
+        return render_weekly_digest(
+            activity=activity,
+            errors=await self._db.top_errors(user_id, limit=3),
+            week=await self._db.fluency_progress(user_id, days=7),
+            previous=await self._db.fluency_progress(user_id, days=30),
+            words_total=await self._db.words_total(user_id),
+        )
 
     # --- тренировка ошибок ----------------------------------------------
 

@@ -335,3 +335,46 @@ async def test_fluency_is_stored_without_pronunciation_scores(config: Config, db
     stat = await db.fluency_progress(USER, days=7)
     assert stat.samples == 1
     assert stat.wpm == 18.0
+
+
+# --- режим «только голос» ----------------------------------------------
+
+
+async def test_voice_only_keeps_corrections_as_text(config: Config, db: Database):
+    reply = TeacherReply(
+        reply="Nice! Where to?",
+        corrections=[Correction("I go", "I went", "Past Simple")],
+    )
+    service = TeacherService(config, db, FakeTeacher(reply), FakeSpeech())
+    await db.ensure_profile(USER)
+    await db.update_profile(USER, voice_only=True)
+
+    result = await service.handle_turn(USER, "turn", "turn")
+
+    assert result.voice_only is True
+    assert result.spoken_text == "Nice! Where to?"
+    # Разговорная часть ушла в голос, исправления остались глазам.
+    assert "Nice! Where to?" not in result.text
+    assert "I went" in result.text
+
+
+async def test_voice_only_without_corrections_sends_no_text(config: Config, db: Database):
+    service = TeacherService(config, db, FakeTeacher(), FakeSpeech())
+    await db.ensure_profile(USER)
+    await db.update_profile(USER, voice_only=True)
+
+    result = await service.handle_turn(USER, "turn", "turn")
+
+    assert result.text == ""
+
+
+async def test_voice_only_falls_back_to_text_without_tts(config: Config, db: Database):
+    """Без озвучки режим «только голос» оставил бы ученика вообще без ответа."""
+    service = TeacherService(config, db, FakeTeacher(), FakeSpeech(can_speak=False))
+    await db.ensure_profile(USER)
+    await db.update_profile(USER, voice_only=True)
+
+    result = await service.handle_turn(USER, "turn", "turn")
+
+    assert result.voice_only is False
+    assert "Nice! And you?" in result.text

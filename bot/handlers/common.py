@@ -14,7 +14,8 @@ from .. import keyboards as kb
 from ..db import Database, Profile
 from ..formatting import render_settings
 from ..service import TeacherService
-from .stats import cmd_mistakes, cmd_progress
+from .drill import cmd_drill
+from .stats import cmd_mistakes, cmd_progress, cmd_words
 
 log = logging.getLogger(__name__)
 
@@ -157,6 +158,45 @@ async def edit_interests(message: Message, db: Database, state: FSMContext) -> N
     await message.answer(render_settings(profile), reply_markup=kb.settings_menu(profile))
 
 
+async def cfg_daily(callback: CallbackQuery, db: Database) -> None:
+    profile = await db.ensure_profile(callback.from_user.id)
+    await _edit(
+        callback,
+        "Во сколько писать утренний вопрос?\n"
+        "Бот напишет первым и предложит тему — так занятия не забываются.",
+        kb.daily_times(profile.daily_time),
+    )
+    await callback.answer()
+
+
+async def cfg_daily_set(callback: CallbackQuery, db: Database) -> None:
+    value = (callback.data or "").rsplit(":", 1)[-1]
+    await db.ensure_profile(callback.from_user.id)
+    if value == "off":
+        await db.update_profile(callback.from_user.id, daily_time=None)
+        await callback.answer("По утрам не пишу")
+    elif value in kb.DAILY_PRESETS:
+        # Сбрасываем отметку об отправке: иначе при смене времени в тот же
+        # день вопрос не придёт до завтра.
+        await db.update_profile(
+            callback.from_user.id, daily_time=value, daily_last_sent=None
+        )
+        await callback.answer(f"Буду писать в {value}")
+    else:
+        await callback.answer("Не понял время")
+        return
+    await _show_settings(callback, db)
+
+
+async def cfg_voice_only(callback: CallbackQuery, db: Database) -> None:
+    profile = await db.ensure_profile(callback.from_user.id)
+    await db.update_profile(callback.from_user.id, voice_only=not profile.voice_only)
+    await callback.answer(
+        "Текст вернул" if profile.voice_only else "Теперь только голос"
+    )
+    await _show_settings(callback, db)
+
+
 async def cfg_voice(callback: CallbackQuery, db: Database) -> None:
     profile = await db.ensure_profile(callback.from_user.id)
     await db.update_profile(callback.from_user.id, voice_replies=not profile.voice_replies)
@@ -207,6 +247,14 @@ async def btn_settings(message: Message, db: Database, state: FSMContext) -> Non
     await cmd_settings(message, db, state)
 
 
+async def btn_words(message: Message, db: Database) -> None:
+    await cmd_words(message, db)
+
+
+async def btn_drill(message: Message, service, state: FSMContext) -> None:
+    await cmd_drill(message, service, state)
+
+
 def build() -> Router:
     """Свежий роутер на каждый вызов — так его можно поднимать в тестах."""
     router = Router(name="common")
@@ -218,13 +266,18 @@ def build() -> Router:
     router.callback_query.register(cfg_level_set, F.data.startswith(kb.CFG_LEVEL_SET))
     router.callback_query.register(cfg_interests, F.data == kb.CFG_INTERESTS)
     router.callback_query.register(cfg_voice, F.data == kb.CFG_VOICE)
+    router.callback_query.register(cfg_voice_only, F.data == kb.CFG_VOICE_ONLY)
+    router.callback_query.register(cfg_daily, F.data == kb.CFG_DAILY)
+    router.callback_query.register(cfg_daily_set, F.data.startswith(kb.CFG_DAILY_SET))
 
     # Ввод интересов: команды и кнопки не должны попадать в профиль как текст.
     free_text = F.text & ~F.text.startswith("/") & ~F.text.in_(kb.BOTTOM_BUTTONS)
     router.message.register(set_interests, Onboarding.interests, free_text)
     router.message.register(edit_interests, Settings.interests, free_text)
 
+    router.message.register(btn_drill, F.text == kb.BTN_DRILL)
     router.message.register(btn_mistakes, F.text == kb.BTN_MISTAKES)
+    router.message.register(btn_words, F.text == kb.BTN_WORDS)
     router.message.register(btn_progress, F.text == kb.BTN_PROGRESS)
     router.message.register(btn_settings, F.text == kb.BTN_SETTINGS)
 

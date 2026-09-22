@@ -18,6 +18,7 @@ from .db import Database
 from .handlers import build_router
 from .llm import Teacher
 from .middlewares import AllowedUserMiddleware
+from .scheduler import Scheduler
 from .service import TeacherService
 from .speech import build_speech
 
@@ -95,6 +96,9 @@ async def run(config: Config) -> None:
                 log.exception("Не удалось сообщить пользователю об ошибке")
         return True
 
+    scheduler = Scheduler(config, db, service, bot)
+    scheduler_task = asyncio.create_task(scheduler.run())
+
     await bot.set_my_commands(COMMANDS)
     log.info(
         "Бот запущен. Прокси: %s | модель: %s | распознавание: %s (произношение: %s) | озвучка: %s",
@@ -111,6 +115,8 @@ async def run(config: Config) -> None:
     try:
         await dispatcher.start_polling(bot, allowed_updates=dispatcher.resolve_used_update_types())
     finally:
+        scheduler_task.cancel()
+        await asyncio.gather(scheduler_task, return_exceptions=True)
         await db.close()
         await teacher.close()
         await bot.session.close()

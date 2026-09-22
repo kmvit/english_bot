@@ -192,7 +192,8 @@ async def test_start_creates_profile_and_offers_levels(
     greeting, question = session.messages()[0], session.messages()[1]
     # Приветствие приносит постоянную клавиатуру, второе сообщение — выбор уровня.
     assert [b.text for row in greeting.reply_markup.keyboard for b in row] == [
-        "📌 Ошибки", "📈 Прогресс", "⚙️ Настройки"
+        "🎯 Тренировка", "📌 Ошибки", "📖 Словарь",
+        "📈 Прогресс", "💬 Тема", "⚙️ Настройки",
     ]
     assert "уровень" in question.text
     buttons = [
@@ -293,12 +294,32 @@ async def test_llm_failure_is_reported_to_user(
     assert "SendVoice" not in session.method_names()
 
 
-async def test_topic_command_requires_argument(
-    dispatcher: Dispatcher, telegram_bot: Bot, session: FakeSession
+async def test_topic_without_argument_suggests_topics(
+    dispatcher: Dispatcher, telegram_bot: Bot, session: FakeSession, db: Database
 ):
+    """Без темы бот предлагает варианты из интересов, а не просит печатать."""
+    await db.ensure_profile(USER)
+    await db.update_profile(USER, interests="cooking, jazz")
+
     await dispatcher.feed_raw_update(telegram_bot, text_update("/topic"))
-    assert "/topic travel" in session.texts()[0]
+
+    sent = session.messages()[0]
+    assert "О чём поговорим" in sent.text
+    topics = [b.text for row in sent.reply_markup.inline_keyboard for b in row]
+    assert topics[:2] == ["cooking", "jazz"]
     assert dispatcher["_teacher"].calls == []
+
+
+async def test_picked_topic_starts_conversation(
+    dispatcher: Dispatcher, telegram_bot: Bot, session: FakeSession, db: Database
+):
+    await db.ensure_profile(USER)
+
+    await dispatcher.feed_raw_update(telegram_bot, callback_update("topic:travel"))
+
+    assert "travel" in dispatcher["_teacher"].calls[0]["turn"]
+    history = await db.get_history(USER, 10)
+    assert history[0]["content"] == "Let's talk about travel."
 
 
 async def test_topic_command_starts_conversation(
@@ -476,7 +497,13 @@ async def test_settings_shows_profile(
     assert "travel" in sent.text
     assert "Голосовые ответы: включены" in sent.text
     labels = [b.text for row in sent.reply_markup.inline_keyboard for b in row]
-    assert labels == ["Уровень: B1", "Интересы", "🔇 Выключить голос"]
+    assert labels == [
+        "Уровень: B1",
+        "Интересы",
+        "⏰ Вопрос по утрам: выкл",
+        "🔇 Выключить голос",
+        "🎧 Только голос",
+    ]
 
 
 async def test_settings_level_can_be_changed_later(

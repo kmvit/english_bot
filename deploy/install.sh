@@ -61,7 +61,12 @@ if [ -f /etc/default/english-bot-tunnel ]; then
         || { journalctl -u "$SERVICE-tunnel" -n 10 --no-pager; exit 1; }
 fi
 
+# Ежедневная копия базы: весь прогресс ученика — один файл.
+cp "$APP_DIR/deploy/$SERVICE-backup.service" "/etc/systemd/system/"
+cp "$APP_DIR/deploy/$SERVICE-backup.timer" "/etc/systemd/system/"
+
 systemctl daemon-reload
+systemctl enable --now "$SERVICE-backup.timer"
 systemctl enable --now "$SERVICE"
 sleep 3
 systemctl is-active --quiet "$SERVICE" && echo "==> Установлен и работает" || {

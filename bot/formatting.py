@@ -20,10 +20,14 @@ def _e(text: str) -> str:
     return escape(text or "", quote=False)
 
 
-def render_reply(reply: TeacherReply) -> str:
-    """Разговорная часть, затем блок исправлений, затем произношение."""
+def render_reply(reply: TeacherReply, include_conversation: bool = True) -> str:
+    """Разговорная часть, затем блок исправлений, затем произношение.
+
+    В режиме «только голос» разговорная часть уходит голосовым, а текстом
+    остаются лишь исправления: их нужно видеть глазами.
+    """
     parts: list[str] = []
-    if reply.reply:
+    if reply.reply and include_conversation:
         parts.append(_e(reply.reply))
 
     if reply.corrections:
@@ -54,6 +58,8 @@ def render_reply(reply: TeacherReply) -> str:
 
     text = "\n\n".join(part for part in parts if part).strip()
     if not text:
+        if not include_conversation:
+            return ""  # нечего исправлять — в голосовом режиме текст не нужен
         text = "Не получилось составить ответ. Попробуй написать ещё раз."
     return _truncate(text)
 
@@ -203,6 +209,41 @@ def render_drill_summary(correct: int, total: int) -> str:
     else:
         tail = "Ничего страшного: повторим завтра, пока не закрепится."
     return f"<b>Итог: {correct} из {total}</b>\n{tail}"
+
+
+def render_weekly_digest(
+    activity: dict,
+    errors: Sequence[ErrorStat],
+    week: FluencyStat,
+    previous: FluencyStat,
+    words_total: int,
+) -> str:
+    lines = ["<b>Итоги недели</b>"]
+    lines.append(
+        f"Сообщений: {activity['messages']}, из них голосовых: {activity['voices']}"
+    )
+    if activity["words"]:
+        lines.append(f"Новых слов: {activity['words']} (всего в словаре {words_total})")
+
+    if week.wpm is not None:
+        line = f"Темп речи: {week.wpm:.0f} слов/мин"
+        if previous.wpm is not None:
+            delta = week.wpm - previous.wpm
+            if abs(delta) >= 3:
+                line += f" ({delta:+.0f} к месячному)"
+        lines.append(line)
+
+    if errors:
+        lines.append("")
+        lines.append("<b>Держатся крепче всего</b>")
+        for error in errors:
+            lines.append(f"• {_e(error.description)} — ×{error.count}")
+        lines.append("")
+        lines.append("Разобрать их: /drill")
+    else:
+        lines.append("")
+        lines.append("Повторяющихся ошибок не набралось — хорошая неделя.")
+    return _truncate("\n".join(lines))
 
 
 def render_voice_too_long(duration: int, limit: int) -> str:

@@ -26,14 +26,29 @@ CFG_LEVEL = "cfg:level"
 CFG_LEVEL_SET = "cfg:level:"
 CFG_INTERESTS = "cfg:interests"
 CFG_VOICE = "cfg:voice"
+CFG_VOICE_ONLY = "cfg:voiceonly"
+CFG_DAILY = "cfg:daily"
+CFG_DAILY_SET = "cfg:daily:"
+TOPIC_PICK = "topic:"
 REPLY_TRANSLATE = "reply:translate"
 REPLY_EXPLAIN = "reply:explain"
 
 # --- подписи нижней клавиатуры ----------------------------------------
+BTN_DRILL = "🎯 Тренировка"
 BTN_MISTAKES = "📌 Ошибки"
+BTN_WORDS = "📖 Словарь"
 BTN_PROGRESS = "📈 Прогресс"
+BTN_TOPIC = "💬 Тема"
 BTN_SETTINGS = "⚙️ Настройки"
-BOTTOM_BUTTONS = frozenset({BTN_MISTAKES, BTN_PROGRESS, BTN_SETTINGS})
+BOTTOM_BUTTONS = frozenset(
+    {BTN_DRILL, BTN_MISTAKES, BTN_WORDS, BTN_PROGRESS, BTN_TOPIC, BTN_SETTINGS}
+)
+
+# Время утреннего вопроса: готовые варианты вместо ручного ввода.
+DAILY_PRESETS = ("08:00", "09:00", "12:00", "19:00", "21:00")
+
+# Темы на случай, когда интересы ещё не заданы.
+DEFAULT_TOPICS = ("travel", "food", "work", "movies", "sport", "plans for the weekend")
 
 
 def onboarding_levels() -> InlineKeyboardMarkup:
@@ -52,18 +67,65 @@ def onboarding_levels() -> InlineKeyboardMarkup:
 
 def settings_menu(profile: Profile) -> InlineKeyboardMarkup:
     voice_label = "🔇 Выключить голос" if profile.voice_replies else "🔊 Включить голос"
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(
-                    text=f"Уровень: {profile.level or 'не задан'}",
-                    callback_data=CFG_LEVEL,
-                ),
-            ],
-            [InlineKeyboardButton(text="Интересы", callback_data=CFG_INTERESTS)],
-            [InlineKeyboardButton(text=voice_label, callback_data=CFG_VOICE)],
-        ]
+    only_label = "📝 Вернуть текст" if profile.voice_only else "🎧 Только голос"
+    daily_label = (
+        f"⏰ Вопрос по утрам: {profile.daily_time}"
+        if profile.daily_time
+        else "⏰ Вопрос по утрам: выкл"
     )
+    rows = [
+        [
+            InlineKeyboardButton(
+                text=f"Уровень: {profile.level or 'не задан'}", callback_data=CFG_LEVEL
+            )
+        ],
+        [InlineKeyboardButton(text="Интересы", callback_data=CFG_INTERESTS)],
+        [InlineKeyboardButton(text=daily_label, callback_data=CFG_DAILY)],
+        [InlineKeyboardButton(text=voice_label, callback_data=CFG_VOICE)],
+    ]
+    # Режим «только голос» имеет смысл лишь когда голосовые вообще включены.
+    if profile.voice_replies:
+        rows.append(
+            [InlineKeyboardButton(text=only_label, callback_data=CFG_VOICE_ONLY)]
+        )
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def daily_times(current: str | None) -> InlineKeyboardMarkup:
+    rows = [
+        [
+            InlineKeyboardButton(
+                text=("✅ " if preset == current else "") + preset,
+                callback_data=f"{CFG_DAILY_SET}{preset}",
+            )
+            for preset in DAILY_PRESETS[:3]
+        ],
+        [
+            InlineKeyboardButton(
+                text=("✅ " if preset == current else "") + preset,
+                callback_data=f"{CFG_DAILY_SET}{preset}",
+            )
+            for preset in DAILY_PRESETS[3:]
+        ],
+        [InlineKeyboardButton(text="Не писать по утрам", callback_data=f"{CFG_DAILY_SET}off")],
+        [InlineKeyboardButton(text="← Назад", callback_data=CFG_ROOT)],
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def topic_suggestions(interests: str | None) -> InlineKeyboardMarkup:
+    """Темы из интересов ученика, добитые общими до шести."""
+    picked = [part.strip() for part in (interests or "").split(",") if part.strip()][:4]
+    for topic in DEFAULT_TOPICS:
+        if len(picked) >= 6:
+            break
+        if topic.lower() not in {p.lower() for p in picked}:
+            picked.append(topic)
+    rows = [
+        [InlineKeyboardButton(text=topic, callback_data=f"{TOPIC_PICK}{topic}"[:64])]
+        for topic in picked
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def settings_levels(current: str | None) -> InlineKeyboardMarkup:
@@ -95,8 +157,9 @@ def reply_actions() -> InlineKeyboardMarkup:
 def main_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text=BTN_MISTAKES), KeyboardButton(text=BTN_PROGRESS)],
-            [KeyboardButton(text=BTN_SETTINGS)],
+            [KeyboardButton(text=BTN_DRILL), KeyboardButton(text=BTN_MISTAKES)],
+            [KeyboardButton(text=BTN_WORDS), KeyboardButton(text=BTN_PROGRESS)],
+            [KeyboardButton(text=BTN_TOPIC), KeyboardButton(text=BTN_SETTINGS)],
         ],
         resize_keyboard=True,
         is_persistent=True,

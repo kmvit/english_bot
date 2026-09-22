@@ -533,6 +533,41 @@ class Database:
             row = await cursor.fetchone()
         return int(row["n"]) if row else 0
 
+    async def activity_since(self, user_id: int, since: datetime) -> dict[str, int]:
+        """Чем ученик занимался за период — для недельной сводки."""
+        moment = _ts(since)
+        async with self.conn.execute(
+            "SELECT COUNT(*) AS n FROM messages WHERE user_id = ? AND role = 'user' "
+            "AND created_at >= ?",
+            (user_id, moment),
+        ) as cursor:
+            messages = int((await cursor.fetchone())["n"])
+        async with self.conn.execute(
+            "SELECT COUNT(*) AS n FROM pronunciation WHERE user_id = ? AND created_at >= ?",
+            (user_id, moment),
+        ) as cursor:
+            voices = int((await cursor.fetchone())["n"])
+        async with self.conn.execute(
+            "SELECT COUNT(*) AS n FROM vocabulary WHERE user_id = ? AND added_at >= ?",
+            (user_id, moment),
+        ) as cursor:
+            words = int((await cursor.fetchone())["n"])
+        async with self.conn.execute(
+            "SELECT COUNT(*) AS n FROM errors WHERE user_id = ? AND last_seen >= ?",
+            (user_id, moment),
+        ) as cursor:
+            errors = int((await cursor.fetchone())["n"])
+        return {
+            "messages": messages,
+            "voices": voices,
+            "words": words,
+            "errors": errors,
+        }
+
+    async def recent_topics(self, user_id: int, limit: int = 6) -> list[str]:
+        """Последние реплики ученика — чтобы утренний вопрос цеплялся за них."""
+        return await self.recent_user_messages(user_id, limit)
+
     # --- расходы -------------------------------------------------------
 
     async def add_usage(
