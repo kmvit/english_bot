@@ -5,6 +5,7 @@ import asyncio
 import logging
 import re
 from dataclasses import dataclass
+from typing import Any
 from pathlib import Path
 
 from .assessment import Assessment
@@ -140,6 +141,42 @@ class TeacherService:
         )
         await self._log_llm(user_id, usage, model)
         return text
+
+    # --- тренировка ошибок ----------------------------------------------
+
+    async def start_drill(self, user_id: int, limit: int = 3) -> list[dict[str, Any]]:
+        """Составить задания по ошибкам, которые пора повторить.
+
+        Пустой список означает, что повторять нечего: либо ошибок ещё нет,
+        либо все отлёживают срок после верных ответов.
+        """
+        errors = await self._db.errors_due_for_drill(user_id, limit=limit)
+        if not errors:
+            return []
+        profile = await self._db.ensure_profile(user_id)
+        exercises, usage, model = await self._teacher.make_drill(
+            profile, [error.description for error in errors]
+        )
+        await self._log_llm(user_id, usage, model)
+        return [
+            {**exercise, "error_id": error.id, "description": error.description}
+            for exercise, error in zip(exercises, errors)
+        ]
+
+    async def check_drill_answer(
+        self, user_id: int, exercise: dict[str, Any], student_answer: str
+    ) -> tuple[bool, str]:
+        correct, feedback, usage, model = await self._teacher.check_drill(
+            exercise.get("sentence", ""),
+            exercise.get("answer", ""),
+            student_answer,
+            exercise.get("focus", ""),
+        )
+        await self._log_llm(user_id, usage, model)
+        error_id = exercise.get("error_id")
+        if error_id:
+            await self._db.record_drill_result(int(error_id), correct)
+        return correct, feedback
 
     # --- голос ----------------------------------------------------------
 

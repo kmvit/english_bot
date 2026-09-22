@@ -26,7 +26,9 @@ log = logging.getLogger("bot")
 COMMANDS = [
     BotCommand(command="topic", description="начать разговор на тему"),
     BotCommand(command="settings", description="уровень, интересы, голос"),
+    BotCommand(command="drill", description="отработать свои ошибки"),
     BotCommand(command="mistakes", description="мои частые ошибки"),
+    BotCommand(command="words", description="мой словарь"),
     BotCommand(command="progress", description="динамика произношения"),
     BotCommand(command="cost", description="расходы за месяц"),
     BotCommand(command="voice", description="голосовые ответы on/off"),

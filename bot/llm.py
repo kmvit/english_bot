@@ -12,13 +12,51 @@ from .config import Config
 from .costs import TokenUsage
 from .db import ErrorStat, Profile
 from .parsing import REPLY_SCHEMA, TeacherReply, parse_level, parse_teacher_reply
-from .prompts import LEVEL_CHECK_SYSTEM, build_system_messages
+from .prompts import (
+    DRILL_CHECK_SYSTEM,
+    DRILL_SYSTEM,
+    LEVEL_CHECK_SYSTEM,
+    build_drill_check_turn,
+    build_drill_turn,
+    build_system_messages,
+)
 
 log = logging.getLogger(__name__)
 
 MAX_REPLY_TOKENS = 2048
 MAX_LEVEL_TOKENS = 64
 MAX_PLAIN_TOKENS = 1024
+
+DRILL_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "exercises": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "sentence": {"type": "string"},
+                    "answer": {"type": "string"},
+                    "focus": {"type": "string"},
+                },
+                "required": ["sentence", "answer", "focus"],
+                "additionalProperties": False,
+            },
+        }
+    },
+    "required": ["exercises"],
+    "additionalProperties": False,
+}
+
+DRILL_CHECK_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "correct": {"type": "boolean"},
+        "feedback": {"type": "string"},
+    },
+    "required": ["correct", "feedback"],
+    "additionalProperties": False,
+}
 
 LEVEL_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -160,6 +198,63 @@ class Teacher:
             model,
         )
 
+    async def make_drill(
+        self, profile: Profile, mistakes: Sequence[str]
+    ) -> tuple[list[dict[str, str]], TokenUsage, str]:
+        """Составить по одному заданию на каждую ошибку."""
+        response, model = await self._create(
+            messages=[
+                {"role": "system", "content": DRILL_SYSTEM},
+                {
+                    "role": "user",
+                    "content": build_drill_turn(profile.level, profile.interests, mistakes),
+                },
+            ],
+            max_tokens=MAX_REPLY_TOKENS,
+            schema=DRILL_SCHEMA,
+            schema_name="drill",
+        )
+        usage = TokenUsage.from_response(getattr(response, "usage", None))
+        payload = _loads_object(_message_text(response))
+        raw = payload.get("exercises") if isinstance(payload, dict) else None
+        exercises = []
+        for item in raw or []:
+            if not isinstance(item, dict):
+                continue
+            sentence = str(item.get("sentence", "")).strip()
+            if not sentence:
+                continue
+            exercises.append(
+                {
+                    "sentence": sentence,
+                    "answer": str(item.get("answer", "")).strip(),
+                    "focus": str(item.get("focus", "")).strip(),
+                }
+            )
+        return exercises, usage, model
+
+    async def check_drill(
+        self, sentence: str, answer: str, student: str, focus: str
+    ) -> tuple[bool, str, TokenUsage, str]:
+        """Проверить ответ ученика. При сбое разбора считаем ответ неверным."""
+        response, model = await self._create(
+            messages=[
+                {"role": "system", "content": DRILL_CHECK_SYSTEM},
+                {
+                    "role": "user",
+                    "content": build_drill_check_turn(sentence, answer, student, focus),
+                },
+            ],
+            max_tokens=MAX_PLAIN_TOKENS,
+            schema=DRILL_CHECK_SCHEMA,
+            schema_name="drill_check",
+        )
+        usage = TokenUsage.from_response(getattr(response, "usage", None))
+        payload = _loads_object(_message_text(response))
+        correct = bool(payload.get("correct")) if isinstance(payload, dict) else False
+        feedback = str(payload.get("feedback", "")).strip() if isinstance(payload, dict) else ""
+        return correct, feedback, usage, model
+
     # --- низкий уровень -------------------------------------------------
 
     async def _create(
@@ -253,6 +348,15 @@ class Teacher:
             self._format_mode = FORMAT_NONE
             return True
         return False
+
+
+def _loads_object(text: str) -> dict[str, Any]:
+    """Разобрать JSON-ответ. Пустой словарь означает, что доверять нечему."""
+    try:
+        payload = json.loads(text)
+    except (ValueError, TypeError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
 
 
 def _message_text(response: Any) -> str:

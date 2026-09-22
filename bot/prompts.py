@@ -59,6 +59,26 @@ Weigh grammar range and accuracy, vocabulary, and sentence complexity. Judge onl
 Answer with exactly one token from: A1, A2, B1, B2, C1. No explanation."""
 
 
+DRILL_SYSTEM = """You write short error-correction exercises for one English learner, based on mistakes they actually made.
+
+For each mistake you are given, write exactly one sentence that contains that mistake and nothing else wrong. Rules:
+- The sentence must sound like something this student would plausibly say — same topics, same level of vocabulary.
+- Put in exactly ONE error, the one described. No second mistakes, no typos, no unnatural word order beyond the error itself.
+- Do not mark, capitalise or hint where the error is.
+- 6 to 12 words. Keep it speakable, not bookish.
+- `answer` is the same sentence with only that error fixed, everything else untouched.
+- `focus` is a two-to-four word Russian label for what is being practised, e.g. "артикль перед существительным".
+
+Return one exercise per mistake, in the same order."""
+
+DRILL_CHECK_SYSTEM = """You check one answer in an error-correction exercise for an English learner.
+
+You get the original sentence with a mistake, the correct version, and what the student wrote.
+Mark `correct` true when the student fixed the target mistake. Ignore differences that do not matter: capitalisation, final punctuation, contractions (I am / I'm), and any wording that is equally correct English.
+Mark it false when the target mistake is still there or the student introduced a new one.
+
+`feedback` is one short line in Russian: what exactly was wrong and the rule in a few words. No praise, no filler, no restating the whole sentence."""
+
 TRANSLATE_SYSTEM = """You translate a message from an English tutor into natural Russian for the student.
 Keep the structure exactly as it is: the same line breaks, the same emoji, the same order of sections.
 Leave the student's English phrases (the ❌ and ✅ lines) in English — the student needs to see them as they are; translate only the explanations around them.
@@ -119,6 +139,25 @@ def build_voice_turn(assessment: Assessment) -> str:
 
 def build_text_turn(text: str) -> str:
     return text
+
+
+def build_drill_turn(
+    level: str | None, interests: str | None, mistakes: Sequence[str]
+) -> str:
+    listed = "\n".join(f"{i}. {m}" for i, m in enumerate(mistakes, 1))
+    return (
+        f"Student level: {level or 'A2'}. Interests: {interests or 'unknown'}.\n"
+        f"Mistakes to practise:\n{listed}"
+    )
+
+
+def build_drill_check_turn(sentence: str, answer: str, student: str, focus: str) -> str:
+    return (
+        f"Exercise sentence (contains the mistake): {sentence}\n"
+        f"Correct version: {answer}\n"
+        f"What is being practised: {focus}\n"
+        f"Student wrote: {student}"
+    )
 
 
 def build_explain_turn(reply_text: str, level: str | None) -> str:

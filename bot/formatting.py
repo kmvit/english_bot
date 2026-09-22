@@ -167,6 +167,44 @@ def render_settings(profile: Profile) -> str:
     )
 
 
+DRILL_NOTHING_TO_DO = (
+    "Повторять нечего — либо ошибок пока не накопилось, либо все уже отработаны "
+    "и ждут своего срока. Поговори со мной, и материал появится."
+)
+
+
+def render_drill_task(index: int, total: int, exercise: dict) -> str:
+    focus = exercise.get("focus") or ""
+    head = f"<b>Задание {index} из {total}</b>"
+    if focus:
+        head += f" — {_e(focus)}"
+    return (
+        f"{head}\n\nНайди ошибку и напиши предложение правильно:\n\n"
+        f"<code>{_e(exercise.get('sentence', ''))}</code>"
+    )
+
+
+def render_drill_result(correct: bool, feedback: str, answer: str) -> str:
+    lines = ["✅ Верно" if correct else "❌ Не совсем"]
+    if feedback:
+        lines.append(_e(feedback))
+    if not correct and answer:
+        lines.append(f"Правильно так: <code>{_e(answer)}</code>")
+    return "\n".join(lines)
+
+
+def render_drill_summary(correct: int, total: int) -> str:
+    if not total:
+        return DRILL_NOTHING_TO_DO
+    if correct == total:
+        tail = "Все верно — эти ошибки вернутся нескоро."
+    elif correct:
+        tail = "То, где ошибся, спрошу снова завтра."
+    else:
+        tail = "Ничего страшного: повторим завтра, пока не закрепится."
+    return f"<b>Итог: {correct} из {total}</b>\n{tail}"
+
+
 def render_voice_too_long(duration: int, limit: int) -> str:
     return (
         f"Голосовое {duration} с — это слишком долго, я разбираю до {limit} с. "

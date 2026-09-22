@@ -20,6 +20,9 @@ class FakeTeacher:
         self.level_calls: list[list[str]] = []
         self.plain_calls: list[dict] = []
         self.plain_value = "готовый текст от модели"
+        self.drill_calls: list[list[str]] = []
+        self.check_calls: list[dict] = []
+        self.drill_correct = True
         self.fail = False
 
     async def reply(self, profile, recurring_errors, history, user_turn, known_words=()):
@@ -45,6 +48,34 @@ class FakeTeacher:
         if self.fail:
             raise LLMError("модель недоступна")
         return self.plain_value, TokenUsage(input_tokens=30, output_tokens=15), "openai/test-model"
+
+    async def make_drill(self, profile, mistakes):
+        self.drill_calls.append(list(mistakes))
+        if self.fail:
+            raise LLMError("модель недоступна")
+        exercises = [
+            {
+                "sentence": f"Sentence with {m}.",
+                "answer": f"Fixed {m}.",
+                "focus": m[:20],
+            }
+            for m in mistakes
+        ]
+        return exercises, TokenUsage(input_tokens=40, output_tokens=20), "openai/test-model"
+
+    async def check_drill(self, sentence, answer, student, focus):
+        self.check_calls.append(
+            {"sentence": sentence, "answer": answer, "student": student, "focus": focus}
+        )
+        if self.fail:
+            raise LLMError("модель недоступна")
+        feedback = "Артикль нужен перед исчисляемым." if not self.drill_correct else ""
+        return (
+            self.drill_correct,
+            feedback,
+            TokenUsage(input_tokens=30, output_tokens=10),
+            "openai/test-model",
+        )
 
     async def assess_level(self, messages):
         self.level_calls.append(list(messages))

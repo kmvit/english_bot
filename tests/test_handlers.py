@@ -649,3 +649,115 @@ async def test_progress_explains_disabled_pronunciation(
     await dp.feed_raw_update(telegram_bot, text_update("/progress"))
 
     assert "Баллы произношения по фонемам появятся" in session.texts()[0]
+
+
+# --- тренировка ошибок -------------------------------------------------
+
+
+async def test_drill_without_errors_says_so(
+    dispatcher: Dispatcher, telegram_bot: Bot, session: FakeSession, db: Database
+):
+    await db.ensure_profile(USER)
+
+    await dispatcher.feed_raw_update(telegram_bot, text_update("/drill"))
+
+    assert "Повторять нечего" in session.texts()[0]
+    assert dispatcher["_teacher"].drill_calls == []
+
+
+async def test_drill_asks_about_recorded_mistakes(
+    dispatcher: Dispatcher, telegram_bot: Bot, session: FakeSession, db: Database
+):
+    await db.ensure_profile(USER)
+    await db.record_errors(USER, [("grammar", "пропускает артикль")])
+
+    await dispatcher.feed_raw_update(telegram_bot, text_update("/drill"))
+
+    assert dispatcher["_teacher"].drill_calls == [["пропускает артикль"]]
+    texts = session.texts()
+    assert "Задание 1 из 1" in texts[-1]
+    assert "Sentence with пропускает артикль." in texts[-1]
+
+
+async def test_drill_correct_answer_postpones_error(
+    dispatcher: Dispatcher, telegram_bot: Bot, session: FakeSession, db: Database
+):
+    await db.ensure_profile(USER)
+    await db.record_errors(USER, [("grammar", "пропускает артикль")])
+
+    await dispatcher.feed_raw_update(telegram_bot, text_update("/drill"))
+    await dispatcher.feed_raw_update(telegram_bot, text_update("I have a cat.", update_id=2))
+
+    texts = session.texts()
+    assert "✅ Верно" in texts[-2]
+    assert "Итог: 1 из 1" in texts[-1]
+    # Ответ на задание не должен уйти в диалог как реплика ученика.
+    assert dispatcher["_teacher"].calls == []
+    assert await db.errors_due_for_drill(USER) == []
+
+
+async def test_drill_wrong_answer_shows_correct_version(
+    dispatcher: Dispatcher, telegram_bot: Bot, session: FakeSession, db: Database
+):
+    dispatcher["_teacher"].drill_correct = False
+    await db.ensure_profile(USER)
+    await db.record_errors(USER, [("grammar", "пропускает артикль")])
+
+    await dispatcher.feed_raw_update(telegram_bot, text_update("/drill"))
+    await dispatcher.feed_raw_update(telegram_bot, text_update("I have cat.", update_id=2))
+
+    texts = session.texts()
+    assert "❌ Не совсем" in texts[-2]
+    assert "Артикль нужен" in texts[-2]
+    assert "Fixed пропускает артикль." in texts[-2]
+    assert "Итог: 0 из 1" in texts[-1]
+    # Серия сброшена, повтор назначен на завтра — а не отложен надолго.
+    error = (await db.top_errors(USER))[0]
+    assert error.drill_streak == 0
+    assert error.drill_due is not None
+    assert await db.errors_due_for_drill(USER) == []
+
+
+async def test_drill_walks_through_several_tasks(
+    dispatcher: Dispatcher, telegram_bot: Bot, session: FakeSession, db: Database
+):
+    await db.ensure_profile(USER)
+    await db.record_errors(USER, [("grammar", "артикли"), ("vocabulary", "make и do")])
+
+    await dispatcher.feed_raw_update(telegram_bot, text_update("/drill"))
+    await dispatcher.feed_raw_update(telegram_bot, text_update("ответ раз", update_id=2))
+    await dispatcher.feed_raw_update(telegram_bot, text_update("ответ два", update_id=3))
+
+    texts = session.texts()
+    assert any("Задание 1 из 2" in t for t in texts)
+    assert any("Задание 2 из 2" in t for t in texts)
+    assert "Итог: 2 из 2" in texts[-1]
+    assert len(dispatcher["_teacher"].check_calls) == 2
+
+
+async def test_drill_can_be_stopped_early(
+    dispatcher: Dispatcher, telegram_bot: Bot, session: FakeSession, db: Database
+):
+    await db.ensure_profile(USER)
+    await db.record_errors(USER, [("grammar", "артикли"), ("vocabulary", "make и do")])
+
+    await dispatcher.feed_raw_update(telegram_bot, text_update("/drill"))
+    await dispatcher.feed_raw_update(telegram_bot, text_update("ответ раз", update_id=2))
+    await dispatcher.feed_raw_update(telegram_bot, callback_update("drill:stop", update_id=3))
+
+    assert "Итог: 1 из 1" in session.texts()[-1]
+    # После остановки текст снова идёт в обычный диалог.
+    await dispatcher.feed_raw_update(telegram_bot, text_update("Hello again", update_id=4))
+    assert dispatcher["_teacher"].calls[0]["turn"] == "Hello again"
+
+
+async def test_drill_survives_model_failure(
+    dispatcher: Dispatcher, telegram_bot: Bot, session: FakeSession, db: Database
+):
+    await db.ensure_profile(USER)
+    await db.record_errors(USER, [("grammar", "артикли")])
+    dispatcher["_teacher"].fail = True
+
+    await dispatcher.feed_raw_update(telegram_bot, text_update("/drill"))
+
+    assert "не отвечает" in session.texts()[0]
