@@ -31,7 +31,10 @@ def render_reply(reply: TeacherReply, include_conversation: bool = True) -> str:
         parts.append(_e(reply.reply))
 
     if reply.corrections:
-        lines = ["<b>Исправления</b>"]
+        # Кому принадлежат зачёркнутые слова, должно быть видно из заголовка:
+        # бот часто пересказывает фразу ученика, и без подписи разбор читается
+        # так, будто он правит сам себя.
+        lines = ["<b>Что поправить в твоей фразе</b>"]
         for correction in reply.corrections:
             if correction.original:
                 lines.append(f"❌ {_e(correction.original)}")
@@ -43,7 +46,7 @@ def render_reply(reply: TeacherReply, include_conversation: bool = True) -> str:
         parts.append("\n".join(lines).strip())
 
     if reply.pronunciation:
-        lines = ["<b>Произношение</b>"]
+        lines = ["<b>Твоё произношение</b>"]
         for tip in reply.pronunciation:
             head = f"🗣 <b>{_e(tip.word)}</b>"
             if tip.phoneme:

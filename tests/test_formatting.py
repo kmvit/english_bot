@@ -21,8 +21,8 @@ def test_reply_has_conversation_first_then_corrections():
     )
     text = render_reply(reply)
 
-    assert text.index("Sounds great!") < text.index("Исправления")
-    assert text.index("Исправления") < text.index("Произношение")
+    assert text.index("Sounds great!") < text.index("Что поправить в твоей фразе")
+    assert text.index("Что поправить в твоей фразе") < text.index("Твоё произношение")
     assert "❌ I go there" in text
     assert "✅ I went there" in text
     assert "/th/" in text
@@ -133,3 +133,14 @@ def test_words_empty():
     from bot.formatting import render_words
 
     assert "Словарь пока пуст" in render_words([], 0)
+
+
+def test_correction_heading_says_whose_phrase_it_is():
+    """Бот пересказывает фразу ученика — без подписи разбор читается как самокритика."""
+    reply = TeacherReply(
+        reply="You like tomato and something else — did you mean coconut?",
+        corrections=[Correction("I like tomato and coco roach", "I like tomato and coconut", "")],
+    )
+    text = render_reply(reply)
+
+    assert "твоей фразе" in text

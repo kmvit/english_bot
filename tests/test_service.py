@@ -102,7 +102,7 @@ async def test_voice_turn_stores_pronunciation_scores(config: Config, db: Databa
 
     result = await service.handle_turn(USER, "voice turn", assessment.transcript, assessment)
 
-    assert "Произношение" in result.text
+    assert "Твоё произношение" in result.text
     progress = await db.pronunciation_progress(USER, days=7)
     assert progress.samples == 1
     assert progress.overall == 72.0
