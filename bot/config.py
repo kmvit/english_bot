@@ -96,6 +96,9 @@ class Config:
     level_check_every: int = 50
     ffmpeg_bin: str = "ffmpeg"
     log_level: str = "INFO"
+    # Учить живой речи с матом: слова не вымарываются, а разбирается уместность.
+    # По умолчанию выключено — включается осознанно самим учеником.
+    teach_profanity: bool = False
     # Часовой пояс ученика: сервер может стоять где угодно, а «девять утра»
     # означает девять утра у него.
     timezone: str = "Europe/Moscow"
@@ -154,6 +157,7 @@ def load_config() -> Config:
         level_check_every=_int("LEVEL_CHECK_EVERY", 50),
         ffmpeg_bin=os.getenv("FFMPEG_BIN", "ffmpeg"),
         log_level=os.getenv("LOG_LEVEL", "INFO"),
+        teach_profanity=_bool("TEACH_PROFANITY"),
         timezone=os.getenv("TIMEZONE", "Europe/Moscow"),
         weekly_weekday=_int("WEEKLY_WEEKDAY", 6),
         weekly_time=os.getenv("WEEKLY_TIME", "19:00"),

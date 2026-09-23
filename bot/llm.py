@@ -128,7 +128,12 @@ class Teacher:
         known_words: Sequence[str] = (),
     ) -> LLMResult:
         messages = [
-            *build_system_messages(profile, recurring_errors, known_words),
+            *build_system_messages(
+                profile,
+                recurring_errors,
+                known_words,
+                self._config.teach_profanity,
+            ),
             *history,
             {"role": "user", "content": user_turn},
         ]

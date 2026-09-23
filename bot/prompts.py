@@ -55,6 +55,13 @@ Answer with a single JSON object and nothing else:
 {"reply": "...", "corrections": [{"original": "...", "corrected": "...", "note": "..."}], "pronunciation": [{"word": "...", "phoneme": "...", "tip": "...", "example": "..."}], "new_errors": [{"type": "grammar", "description": "..."}]}
 Do not put markdown, corrections or pronunciation advice inside `reply` — the bot formats the message itself."""
 
+PROFANITY_BLOCK = """
+# Strong language
+This student is an adult who asked to be taught spoken English as it is actually spoken, swearing included.
+- Never censor a swear word, never replace it with asterisks, and never paraphrase it away. If the student said "fuck", use that word yourself when you talk about what they said — writing around it teaches them nothing and reads as disapproval.
+- Swearing is not a mistake. Never put it in `corrections` and never log it in `new_errors`. What is worth correcting is the grammar around it: "he fucking girl" -> "he's fucking a girl in every city" is a correction about the missing auxiliary and article, not about the word.
+- Register is worth teaching, once and briefly: if a phrase works with friends but would cost them a job interview, say so in one line. Do not moralise, do not add disclaimers, do not suggest politer synonyms unless asked."""
+
 LEVEL_CHECK_SYSTEM = """You assess the CEFR level of an English learner from a transcript of their own messages.
 Weigh grammar range and accuracy, vocabulary, and sentence complexity. Judge only the student's messages.
 Answer with exactly one token from: A1, A2, B1, B2, C1. No explanation."""
@@ -110,10 +117,16 @@ def build_system_messages(
     profile: Profile,
     recurring_errors: Sequence[ErrorStat] = (),
     known_words: Sequence[str] = (),
+    teach_profanity: bool = False,
 ) -> list[dict[str, Any]]:
-    """Стабильная инструкция (кешируется) + изменяемый профиль ученика."""
+    """Стабильная инструкция (кешируется) + изменяемый профиль ученика.
+
+    Блок про крепкие выражения идёт внутри первого сообщения, а не отдельным:
+    так он остаётся частью неизменного префикса и не ломает кеш.
+    """
+    teacher = TEACHER_SYSTEM + (PROFANITY_BLOCK if teach_profanity else "")
     return [
-        {"role": "system", "content": TEACHER_SYSTEM},
+        {"role": "system", "content": teacher},
         {
             "role": "system",
             "content": _profile_block(profile, recurring_errors, known_words),

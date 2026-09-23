@@ -17,6 +17,7 @@ from bot.db import Profile
 from bot.llm import LLMError, Teacher
 
 PROFILE = Profile(user_id=1, level="A2", interests="travel")
+PROFANITY_PROFILE = Profile(user_id=1, level="B1", interests="travel")
 REPLY_JSON = json.dumps(
     {
         "reply": "Nice! Where to?",
@@ -217,3 +218,27 @@ async def test_assess_level_without_messages_makes_no_request(config: Config):
     teacher, fake = build(config, [])
     level, usage, _ = await teacher.assess_level(["  ", ""])
     assert level is None and usage.total == 0 and fake.calls == []
+
+
+async def test_profanity_block_is_off_by_default(config: Config):
+    teacher, fake = build(config, [completion(REPLY_JSON)])
+
+    await teacher.reply(PROFANITY_PROFILE, [], [], "he fucking girl")
+
+    system = fake.calls[0]["messages"][0]["content"]
+    assert "Strong language" not in system
+
+
+async def test_profanity_block_is_added_when_enabled(config: Config):
+    from dataclasses import replace
+
+    teacher, fake = build(replace(config, teach_profanity=True), [completion(REPLY_JSON)])
+
+    await teacher.reply(PROFANITY_PROFILE, [], [], "he fucking girl")
+
+    system = fake.calls[0]["messages"][0]["content"]
+    assert "Strong language" in system
+    # Мат — не ошибка: это главное, ради чего блок и добавляется.
+    assert "Swearing is not a mistake" in system
+    # Блок внутри первого сообщения, иначе он ломал бы кеш префикса.
+    assert len(fake.calls[0]["messages"]) == 3
