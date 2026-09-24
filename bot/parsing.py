@@ -62,6 +62,10 @@ REPLY_SCHEMA: dict[str, Any] = {
                 "additionalProperties": False,
             },
         },
+        "reply_ru": {
+            "type": "string",
+            "description": "Русский перевод reply; пустая строка, если перевод не нужен.",
+        },
         "expand": {
             "type": "string",
             "description": "Подсказка развернуть куцый ответ; пустая строка, если не нужна.",
@@ -83,6 +87,7 @@ REPLY_SCHEMA: dict[str, Any] = {
     },
     "required": [
         "reply",
+        "reply_ru",
         "corrections",
         "pronunciation",
         "new_errors",
@@ -151,6 +156,8 @@ class TeacherReply:
     pronunciation: list[PronunciationTip] = field(default_factory=list)
     new_errors: list[LoggedError] = field(default_factory=list)
     new_words: list[NewWord] = field(default_factory=list)
+    #: Русский перевод разговорной части. Пусто, когда перевод выключен.
+    reply_ru: str = ""
     #: Приглашение развернуть ответ. Пусто, когда короткий ответ был уместен.
     expand: str = ""
     raw_json_ok: bool = True
@@ -300,6 +307,8 @@ def parse_teacher_reply(text: str) -> TeacherReply:
 
     expand = payload.get("expand")
     expand = expand.strip() if isinstance(expand, str) else ""
+    reply_ru = payload.get("reply_ru")
+    reply_ru = reply_ru.strip() if isinstance(reply_ru, str) else ""
 
     return TeacherReply(
         reply=reply.strip(),
@@ -307,6 +316,7 @@ def parse_teacher_reply(text: str) -> TeacherReply:
         pronunciation=pronunciation,
         new_errors=new_errors,
         new_words=new_words,
+        reply_ru=reply_ru,
         expand=expand,
         raw_json_ok=True,
     )

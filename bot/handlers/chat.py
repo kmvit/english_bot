@@ -62,7 +62,9 @@ async def _reply_turn(
             return
 
     if result.text:
-        await message.answer(result.text, reply_markup=kb.reply_actions())
+        await message.answer(
+            result.text, reply_markup=kb.reply_actions(result.translated)
+        )
 
     if not (result.voice_enabled and result.spoken_text):
         return

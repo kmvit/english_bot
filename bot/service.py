@@ -46,6 +46,8 @@ class TurnResult:
     voice_enabled: bool
     #: Разговорная часть ушла в голосовое, текстом остались только исправления.
     voice_only: bool = False
+    #: Перевод уже показан — кнопка «Перевести» не нужна.
+    translated: bool = False
 
 
 class TeacherService:
@@ -126,6 +128,7 @@ class TeacherService:
             spoken_text=reply.reply,
             voice_enabled=profile.voice_replies,
             voice_only=voice_only,
+            translated=bool(reply.reply_ru) and not voice_only,
         )
 
     async def _log_llm(self, user_id: int, usage: TokenUsage, model: str) -> None:

@@ -162,3 +162,28 @@ def test_expand_hint_goes_right_after_the_reply():
 def test_no_hint_when_answer_was_enough():
     text = render_reply(TeacherReply(reply="Good to hear!", expand=""))
     assert text == "Good to hear!"
+
+
+def test_translation_goes_under_the_reply():
+    reply = TeacherReply(
+        reply="Good to hear!",
+        reply_ru="Рад слышать!",
+        corrections=[Correction("I go", "I went", "Past")],
+    )
+    text = render_reply(reply)
+
+    assert text.index("Good to hear!") < text.index("Рад слышать!")
+    assert text.index("Рад слышать!") < text.index("Что поправить")
+
+
+def test_no_translation_block_when_empty():
+    text = render_reply(TeacherReply(reply="Good to hear!", reply_ru=""))
+    assert text == "Good to hear!"
+
+
+def test_translation_is_skipped_in_voice_only_mode():
+    """В голосовом режиме перевод не нужен: смысл в том, чтобы слушать."""
+    reply = TeacherReply(reply="Good to hear!", reply_ru="Рад слышать!")
+    text = render_reply(reply, include_conversation=False)
+
+    assert "Рад слышать!" not in text

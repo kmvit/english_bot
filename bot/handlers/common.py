@@ -198,6 +198,17 @@ async def cfg_daily_set(callback: CallbackQuery, db: Database) -> None:
     await _show_settings(callback, db)
 
 
+async def cfg_translate(callback: CallbackQuery, db: Database) -> None:
+    profile = await db.ensure_profile(callback.from_user.id)
+    await db.update_profile(
+        callback.from_user.id, translate_replies=not profile.translate_replies
+    )
+    await callback.answer(
+        "Перевод выключен" if profile.translate_replies else "Перевод включён"
+    )
+    await _show_settings(callback, db)
+
+
 async def cfg_voice_only(callback: CallbackQuery, db: Database) -> None:
     profile = await db.ensure_profile(callback.from_user.id)
     await db.update_profile(callback.from_user.id, voice_only=not profile.voice_only)
@@ -277,6 +288,7 @@ def build() -> Router:
     router.callback_query.register(cfg_interests, F.data == kb.CFG_INTERESTS)
     router.callback_query.register(cfg_voice, F.data == kb.CFG_VOICE)
     router.callback_query.register(cfg_voice_only, F.data == kb.CFG_VOICE_ONLY)
+    router.callback_query.register(cfg_translate, F.data == kb.CFG_TRANSLATE)
     router.callback_query.register(cfg_daily, F.data == kb.CFG_DAILY)
     router.callback_query.register(cfg_daily_set, F.data.startswith(kb.CFG_DAILY_SET))
 

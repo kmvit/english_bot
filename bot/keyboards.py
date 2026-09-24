@@ -27,6 +27,7 @@ CFG_LEVEL_SET = "cfg:level:"
 CFG_INTERESTS = "cfg:interests"
 CFG_VOICE = "cfg:voice"
 CFG_VOICE_ONLY = "cfg:voiceonly"
+CFG_TRANSLATE = "cfg:translate"
 CFG_DAILY = "cfg:daily"
 CFG_DAILY_SET = "cfg:daily:"
 TOPIC_PICK = "topic:"
@@ -68,6 +69,9 @@ def onboarding_levels() -> InlineKeyboardMarkup:
 def settings_menu(profile: Profile) -> InlineKeyboardMarkup:
     voice_label = "🔇 Выключить голос" if profile.voice_replies else "🔊 Включить голос"
     only_label = "📝 Вернуть текст" if profile.voice_only else "🎧 Только голос"
+    translate_label = (
+        "🇷🇺 Перевод: включён" if profile.translate_replies else "🇷🇺 Перевод: выключен"
+    )
     daily_label = (
         f"⏰ Вопрос по утрам: {profile.daily_time}"
         if profile.daily_time
@@ -81,6 +85,7 @@ def settings_menu(profile: Profile) -> InlineKeyboardMarkup:
         ],
         [InlineKeyboardButton(text="Интересы", callback_data=CFG_INTERESTS)],
         [InlineKeyboardButton(text=daily_label, callback_data=CFG_DAILY)],
+        [InlineKeyboardButton(text=translate_label, callback_data=CFG_TRANSLATE)],
         [InlineKeyboardButton(text=voice_label, callback_data=CFG_VOICE)],
     ]
     # Режим «только голос» имеет смысл лишь когда голосовые вообще включены.
@@ -142,16 +147,19 @@ def settings_levels(current: str | None) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def reply_actions() -> InlineKeyboardMarkup:
-    """Кнопки под ответом учителя. Каждое нажатие — отдельный запрос к модели."""
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(text="🇷🇺 Перевести", callback_data=REPLY_TRANSLATE),
-                InlineKeyboardButton(text="💡 Подробнее", callback_data=REPLY_EXPLAIN),
-            ]
-        ]
-    )
+def reply_actions(translated: bool = False) -> InlineKeyboardMarkup:
+    """Кнопки под ответом учителя. Каждое нажатие — отдельный запрос к модели.
+
+    Кнопку перевода прячем, когда перевод уже показан: нажимать её незачем,
+    а место она занимает.
+    """
+    buttons = []
+    if not translated:
+        buttons.append(
+            InlineKeyboardButton(text="🇷🇺 Перевести", callback_data=REPLY_TRANSLATE)
+        )
+    buttons.append(InlineKeyboardButton(text="💡 Подробнее", callback_data=REPLY_EXPLAIN))
+    return InlineKeyboardMarkup(inline_keyboard=[buttons])
 
 
 def main_keyboard() -> ReplyKeyboardMarkup:

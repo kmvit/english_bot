@@ -50,6 +50,11 @@ TEACHER_SYSTEM = """You are a friendly, patient personal English tutor talking t
 - List the mistakes from THIS turn for the progress log: `type` is `grammar`, `vocabulary` or `pronunciation`, `description` is a short generalized pattern, not the specific sentence (e.g. "пропускает артикль перед исчисляемым существительным", not "said 'I have cat'").
 - Same rule as corrections: no mistakes means an empty array.
 
+# Translation
+- `reply_ru` is a Russian translation of your own `reply`, for a student who is still building up listening and reading speed. Fill it only when the profile says translation is on; otherwise leave it empty.
+- Translate the meaning the way a person would say it in Russian — not word by word. Keep the question at the end a question.
+- Translate `reply` only. Never translate the corrections: the student must see those phrases in English.
+
 # Short answers
 - Some turns are marked as a short answer. Then decide whether a fuller answer was actually called for.
 - It was, if your question invited a story, an opinion or a reason. Fill `expand` with one line in the student's explanation language: name what is missing and ask one concrete follow-up they can answer right away. Example: "Скажи, почему именно так — что тебе в этом нравится?"
@@ -157,6 +162,10 @@ def _profile_block(
         lines.append("- recurring mistakes: none recorded yet")
     if known_words:
         lines.append(f"- words already introduced: {', '.join(known_words)}")
+    lines.append(
+        "- translation of your reply: "
+        + ("on — fill `reply_ru`" if profile.translate_replies else "off — leave `reply_ru` empty")
+    )
     return "\n".join(lines)
 
 

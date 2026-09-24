@@ -28,7 +28,10 @@ def render_reply(reply: TeacherReply, include_conversation: bool = True) -> str:
     """
     parts: list[str] = []
     if reply.reply and include_conversation:
-        parts.append(_e(reply.reply))
+        head = _e(reply.reply)
+        if reply.reply_ru:
+            head += f"\n\n🇷🇺 <i>{_e(reply.reply_ru)}</i>"
+        parts.append(head)
     # Подсказка идёт сразу за репликой, до разбора ошибок: это приглашение
     # продолжить разговор, а не замечание.
     if reply.expand:

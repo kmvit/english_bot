@@ -501,6 +501,7 @@ async def test_settings_shows_profile(
         "Уровень: B1",
         "Интересы",
         "⏰ Вопрос по утрам: выкл",
+        "🇷🇺 Перевод: включён",
         "🔇 Выключить голос",
         "🎧 Только голос",
     ]
@@ -896,3 +897,62 @@ async def test_hint_reaches_the_student(
     await dispatcher.feed_raw_update(telegram_bot, text_update("Fine"))
 
     assert "Скажи, почему именно так?" in session.texts()[0]
+
+
+# --- постоянный перевод -------------------------------------------------
+
+
+async def test_translation_comes_with_the_reply(
+    dispatcher: Dispatcher, telegram_bot: Bot, session: FakeSession
+):
+    from bot.parsing import TeacherReply as Reply
+
+    dispatcher["_teacher"].reply_value = Reply(
+        reply="Good to hear! What did you do?",
+        reply_ru="Рад слышать! Чем занимался?",
+    )
+
+    await dispatcher.feed_raw_update(telegram_bot, text_update("I am fine today"))
+
+    answer = session.messages()[0]
+    assert "Good to hear!" in answer.text
+    assert "Рад слышать!" in answer.text
+    # Перевод уже на экране — кнопка «Перевести» только занимала бы место.
+    buttons = [b.callback_data for row in answer.reply_markup.inline_keyboard for b in row]
+    assert buttons == ["reply:explain"]
+
+
+async def test_translate_button_stays_without_translation(
+    dispatcher: Dispatcher, telegram_bot: Bot, session: FakeSession
+):
+    await dispatcher.feed_raw_update(telegram_bot, text_update("I am fine today"))
+
+    answer = session.messages()[0]
+    buttons = [b.callback_data for row in answer.reply_markup.inline_keyboard for b in row]
+    assert buttons == ["reply:translate", "reply:explain"]
+
+
+async def test_translation_can_be_turned_off(
+    dispatcher: Dispatcher, telegram_bot: Bot, db: Database
+):
+    await db.ensure_profile(USER)
+
+    await dispatcher.feed_raw_update(telegram_bot, callback_update("cfg:translate"))
+
+    profile = await db.get_profile(USER)
+    assert profile is not None and profile.translate_replies is False
+
+
+async def test_profile_block_tells_model_about_translation(
+    dispatcher: Dispatcher, telegram_bot: Bot, db: Database
+):
+    await db.ensure_profile(USER)
+    await db.update_profile(USER, translate_replies=False)
+
+    await dispatcher.feed_raw_update(telegram_bot, text_update("hello"))
+
+    from bot.prompts import build_system_messages
+
+    profile = await db.get_profile(USER)
+    block = build_system_messages(profile)[1]["content"]
+    assert "off — leave `reply_ru` empty" in block

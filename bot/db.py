@@ -98,6 +98,7 @@ MIGRATIONS: tuple[tuple[str, str, str], ...] = (
     ("profile", "daily_last_sent", "TEXT"),
     ("profile", "weekly_last_sent", "TEXT"),
     ("profile", "voice_only", "INTEGER NOT NULL DEFAULT 0"),
+    ("profile", "translate_replies", "INTEGER NOT NULL DEFAULT 1"),
     ("errors", "drill_due", "TEXT"),
     ("errors", "drill_streak", "INTEGER NOT NULL DEFAULT 0"),
     ("pronunciation", "words", "INTEGER"),
@@ -128,6 +129,8 @@ class Profile:
     voice_replies: bool = True
     #: Только голос: разговорная часть уходит голосовым, без дублирования текстом.
     voice_only: bool = False
+    #: Показывать русский перевод реплики бота сразу, без нажатия кнопки.
+    translate_replies: bool = True
     messages_total: int = 0
     level_checked_at_message: int = 0
     #: Время ежедневного вопроса в местном часовом поясе, "HH:MM" или None.
@@ -245,6 +248,7 @@ class Database:
             native_language=row["native_language"],
             voice_replies=bool(row["voice_replies"]),
             voice_only=bool(row["voice_only"]),
+            translate_replies=bool(row["translate_replies"]),
             messages_total=row["messages_total"],
             level_checked_at_message=row["level_checked_at_message"],
             daily_time=row["daily_time"],
@@ -259,6 +263,7 @@ class Database:
             "native_language",
             "voice_replies",
             "voice_only",
+            "translate_replies",
             "messages_total",
             "level_checked_at_message",
             "daily_time",
@@ -268,7 +273,7 @@ class Database:
         updates = {k: v for k, v in fields.items() if k in allowed}
         if not updates:
             return
-        for flag in ("voice_replies", "voice_only"):
+        for flag in ("voice_replies", "voice_only", "translate_replies"):
             if flag in updates:
                 updates[flag] = int(bool(updates[flag]))
         assignments = ", ".join(f"{key} = ?" for key in updates)
