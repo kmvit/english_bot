@@ -62,6 +62,10 @@ REPLY_SCHEMA: dict[str, Any] = {
                 "additionalProperties": False,
             },
         },
+        "expand": {
+            "type": "string",
+            "description": "Подсказка развернуть куцый ответ; пустая строка, если не нужна.",
+        },
         "new_words": {
             "type": "array",
             "description": "Слова, которые учитель ввёл в этой реплике впервые.",
@@ -77,7 +81,14 @@ REPLY_SCHEMA: dict[str, Any] = {
             },
         },
     },
-    "required": ["reply", "corrections", "pronunciation", "new_errors", "new_words"],
+    "required": [
+        "reply",
+        "corrections",
+        "pronunciation",
+        "new_errors",
+        "new_words",
+        "expand",
+    ],
     "additionalProperties": False,
 }
 
@@ -140,6 +151,8 @@ class TeacherReply:
     pronunciation: list[PronunciationTip] = field(default_factory=list)
     new_errors: list[LoggedError] = field(default_factory=list)
     new_words: list[NewWord] = field(default_factory=list)
+    #: Приглашение развернуть ответ. Пусто, когда короткий ответ был уместен.
+    expand: str = ""
     raw_json_ok: bool = True
 
 
@@ -285,12 +298,16 @@ def parse_teacher_reply(text: str) -> TeacherReply:
             )
         )
 
+    expand = payload.get("expand")
+    expand = expand.strip() if isinstance(expand, str) else ""
+
     return TeacherReply(
         reply=reply.strip(),
         corrections=corrections,
         pronunciation=pronunciation,
         new_errors=new_errors,
         new_words=new_words,
+        expand=expand,
         raw_json_ok=True,
     )
 

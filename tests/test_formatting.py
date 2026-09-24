@@ -144,3 +144,21 @@ def test_correction_heading_says_whose_phrase_it_is():
     text = render_reply(reply)
 
     assert "твоей фразе" in text
+
+
+def test_expand_hint_goes_right_after_the_reply():
+    """Подсказка — приглашение продолжить разговор, а не замечание в конце."""
+    reply = TeacherReply(
+        reply="Good to hear!",
+        expand="Скажи, почему именно так — что тебе в этом нравится?",
+        corrections=[Correction("I go", "I went", "Past")],
+    )
+    text = render_reply(reply)
+
+    assert text.index("Good to hear!") < text.index("Скажи, почему")
+    assert text.index("Скажи, почему") < text.index("Что поправить")
+
+
+def test_no_hint_when_answer_was_enough():
+    text = render_reply(TeacherReply(reply="Good to hear!", expand=""))
+    assert text == "Good to hear!"

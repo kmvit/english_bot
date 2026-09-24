@@ -862,3 +862,37 @@ async def test_current_turn_is_marked_for_the_model(
     turn = dispatcher["_teacher"].calls[0]["turn"]
     assert "correct only this one" in turn
     assert turn.endswith("I go to Rome")
+
+
+# --- подсказка развернуть ответ ----------------------------------------
+
+
+async def test_short_answer_is_marked_for_the_model(
+    dispatcher: Dispatcher, telegram_bot: Bot
+):
+    await dispatcher.feed_raw_update(telegram_bot, text_update("Fine"))
+
+    assert "short answer" in dispatcher["_teacher"].calls[0]["turn"]
+
+
+async def test_full_answer_is_not_marked(dispatcher: Dispatcher, telegram_bot: Bot):
+    await dispatcher.feed_raw_update(
+        telegram_bot,
+        text_update("I am doing great today because the weather is finally warm"),
+    )
+
+    assert "short answer" not in dispatcher["_teacher"].calls[0]["turn"]
+
+
+async def test_hint_reaches_the_student(
+    dispatcher: Dispatcher, telegram_bot: Bot, session: FakeSession
+):
+    from bot.parsing import TeacherReply as Reply
+
+    dispatcher["_teacher"].reply_value = Reply(
+        reply="Good to hear!", expand="Скажи, почему именно так?"
+    )
+
+    await dispatcher.feed_raw_update(telegram_bot, text_update("Fine"))
+
+    assert "Скажи, почему именно так?" in session.texts()[0]

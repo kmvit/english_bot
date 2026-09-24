@@ -433,3 +433,24 @@ async def test_kokoro_synthesis_failure_becomes_speech_error(kokoro_files: Confi
 
     with pytest.raises(SpeechError):
         await kokoro.synthesize("hi", tmp_path / "a.wav")
+
+
+# --- определение короткого ответа --------------------------------------
+
+
+@pytest.mark.parametrize(
+    "text,limit,expected",
+    [
+        ("Fine", 4, True),
+        ("Yes, I do", 4, True),
+        ("Отлично, спасибо", 4, True),
+        ("I am doing great today because the weather is warm", 4, False),
+        ("", 4, False),          # пустое — не повод для подсказки
+        ("   ", 4, False),
+        ("one two three four five", 4, False),
+    ],
+)
+def test_is_short_answer(text, limit, expected):
+    from bot.prompts import is_short_answer
+
+    assert is_short_answer(text, limit) is expected

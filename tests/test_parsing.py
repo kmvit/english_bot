@@ -176,3 +176,19 @@ def test_non_string_reply_is_stringified():
 )
 def test_parse_level(text, expected):
     assert parse_level(text) == expected
+
+
+def test_expand_hint_is_parsed():
+    result = parse_teacher_reply(
+        json.dumps({"reply": "Nice!", "expand": "Скажи, почему именно так?"})
+    )
+    assert result.expand == "Скажи, почему именно так?"
+
+
+def test_expand_is_empty_when_not_needed():
+    assert parse_teacher_reply('{"reply": "Nice!", "expand": ""}').expand == ""
+    assert parse_teacher_reply('{"reply": "Nice!"}').expand == ""
+
+
+def test_non_string_expand_is_ignored():
+    assert parse_teacher_reply('{"reply": "ok", "expand": 42}').expand == ""

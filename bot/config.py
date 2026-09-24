@@ -98,6 +98,9 @@ class Config:
     level_check_every: int = 50
     ffmpeg_bin: str = "ffmpeg"
     log_level: str = "INFO"
+    # Ответ короче этого числа слов — повод предложить развернуть мысль.
+    # По данным переписки таких ответов около 6%: порог отсекает именно их.
+    short_answer_words: int = 4
     # Учить живой речи с матом: слова не вымарываются, а разбирается уместность.
     # По умолчанию выключено — включается осознанно самим учеником.
     teach_profanity: bool = False
@@ -161,6 +164,7 @@ def load_config() -> Config:
         level_check_every=_int("LEVEL_CHECK_EVERY", 50),
         ffmpeg_bin=os.getenv("FFMPEG_BIN", "ffmpeg"),
         log_level=os.getenv("LOG_LEVEL", "INFO"),
+        short_answer_words=_int("SHORT_ANSWER_WORDS", 4),
         teach_profanity=_bool("TEACH_PROFANITY"),
         timezone=os.getenv("TIMEZONE", "Europe/Moscow"),
         weekly_weekday=_int("WEEKLY_WEEKDAY", 6),

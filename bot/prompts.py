@@ -50,9 +50,15 @@ TEACHER_SYSTEM = """You are a friendly, patient personal English tutor talking t
 - List the mistakes from THIS turn for the progress log: `type` is `grammar`, `vocabulary` or `pronunciation`, `description` is a short generalized pattern, not the specific sentence (e.g. "пропускает артикль перед исчисляемым существительным", not "said 'I have cat'").
 - Same rule as corrections: no mistakes means an empty array.
 
+# Short answers
+- Some turns are marked as a short answer. Then decide whether a fuller answer was actually called for.
+- It was, if your question invited a story, an opinion or a reason. Fill `expand` with one line in the student's explanation language: name what is missing and ask one concrete follow-up they can answer right away. Example: "Скажи, почему именно так — что тебе в этом нравится?"
+- It was not, if a short answer is what the question deserved: yes/no, a name, a number, a choice between two things. Leave `expand` empty. A person who answers "Yes, I do" to "Do you like coffee?" said everything there was to say.
+- Leave `expand` empty on turns that are not marked.
+
 # Output
 Answer with a single JSON object and nothing else:
-{"reply": "...", "corrections": [{"original": "...", "corrected": "...", "note": "..."}], "pronunciation": [{"word": "...", "phoneme": "...", "tip": "...", "example": "..."}], "new_errors": [{"type": "grammar", "description": "..."}]}
+{"reply": "...", "corrections": [{"original": "...", "corrected": "...", "note": "..."}], "pronunciation": [{"word": "...", "phoneme": "...", "tip": "...", "example": "..."}], "new_errors": [{"type": "grammar", "description": "..."}], "new_words": [{"word": "...", "meaning": "...", "example": "..."}], "expand": ""}
 Do not put markdown, corrections or pronunciation advice inside `reply` — the bot formats the message itself."""
 
 PROFANITY_BLOCK = """
@@ -158,22 +164,36 @@ def _profile_block(
 # разговорные реплики. Чтобы модель не решила «наверстать» старые ошибки,
 # текущий ход помечается явно.
 CURRENT_TURN_MARK = "[new message — correct only this one]"
+SHORT_ANSWER_MARK = "[short answer — see the rules about `expand`]"
 
 
-def build_voice_turn(assessment: Assessment) -> str:
+def _marks(short_answer: bool) -> str:
+    marks = [CURRENT_TURN_MARK]
+    if short_answer:
+        marks.append(SHORT_ANSWER_MARK)
+    return " ".join(marks)
+
+
+def build_voice_turn(assessment: Assessment, short_answer: bool = False) -> str:
     """Ход пользователя для голосового: транскрипт + компактный отчёт Azure."""
     report = json.dumps(
         assessment.to_compact_dict(), ensure_ascii=False, sort_keys=True
     )
     return (
-        f"{CURRENT_TURN_MARK} The student sent a voice message.\n"
+        f"{_marks(short_answer)} The student sent a voice message.\n"
         f'Transcript: "{assessment.transcript}"\n'
         f"Pronunciation report (JSON, scores 0-100): {report}"
     )
 
 
-def build_text_turn(text: str) -> str:
-    return f"{CURRENT_TURN_MARK}\n{text}"
+def build_text_turn(text: str, short_answer: bool = False) -> str:
+    return f"{_marks(short_answer)}\n{text}"
+
+
+def is_short_answer(text: str, limit: int) -> bool:
+    """Короткий ли ответ. Уместна ли подсказка — решает модель, а не счётчик."""
+    words = len((text or "").split())
+    return 0 < words <= limit
 
 
 def build_daily_turn(

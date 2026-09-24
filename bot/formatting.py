@@ -29,6 +29,10 @@ def render_reply(reply: TeacherReply, include_conversation: bool = True) -> str:
     parts: list[str] = []
     if reply.reply and include_conversation:
         parts.append(_e(reply.reply))
+    # Подсказка идёт сразу за репликой, до разбора ошибок: это приглашение
+    # продолжить разговор, а не замечание.
+    if reply.expand:
+        parts.append(f"💬 <i>{_e(reply.expand)}</i>")
 
     if reply.corrections:
         # Кому принадлежат зачёркнутые слова, должно быть видно из заголовка:
