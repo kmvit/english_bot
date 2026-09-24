@@ -993,24 +993,31 @@ async def test_style_reaches_the_prompt(
     assert "When he gets it wrong" in system
     # Ругань — про ошибку, не про человека: это должно быть в промпте всегда.
     assert "Never attack him as a person" in system
+    # Роль задаётся манерой: «friendly, patient» глушило жёсткий тон целиком.
+    assert system.startswith("You are this student's English coach")
 
 
-async def test_neutral_style_adds_nothing(
+async def test_neutral_style_keeps_the_friendly_role(
     dispatcher: Dispatcher, telegram_bot: Bot, db: Database
 ):
     await db.ensure_profile(USER)
 
-    from bot.prompts import TEACHER_SYSTEM, build_system_messages
+    from bot.prompts import NEUTRAL_ROLE, build_system_messages
 
     profile = await db.get_profile(USER)
-    assert build_system_messages(profile)[0]["content"] == TEACHER_SYSTEM
+    system = build_system_messages(profile)[0]["content"]
+    assert system.startswith(NEUTRAL_ROLE)
+    assert "When he gets it wrong" not in system
 
 
 async def test_broken_style_value_falls_back_to_neutral(db: Database):
-    from bot.prompts import TEACHER_SYSTEM, build_system_messages
+    from bot.prompts import NEUTRAL_ROLE, ROLE_PLACEHOLDER, build_system_messages
 
     await db.ensure_profile(USER)
     await db.update_profile(USER, tutor_style="чепуха")
 
     profile = await db.get_profile(USER)
-    assert build_system_messages(profile)[0]["content"] == TEACHER_SYSTEM
+    system = build_system_messages(profile)[0]["content"]
+    assert system.startswith(NEUTRAL_ROLE)
+    # Заглушка должна быть заменена всегда, иначе она уедет в промпт как есть.
+    assert ROLE_PLACEHOLDER not in system
