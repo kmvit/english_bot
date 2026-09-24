@@ -209,6 +209,16 @@ async def cfg_translate(callback: CallbackQuery, db: Database) -> None:
     await _show_settings(callback, db)
 
 
+async def cfg_style(callback: CallbackQuery, db: Database) -> None:
+    """Манера переключается по кругу: вариантов три, отдельного экрана не нужно."""
+    profile = await db.ensure_profile(callback.from_user.id)
+    current = profile.tutor_style if profile.tutor_style in kb.STYLES else "neutral"
+    nxt = kb.STYLES[(kb.STYLES.index(current) + 1) % len(kb.STYLES)]
+    await db.update_profile(callback.from_user.id, tutor_style=nxt)
+    await callback.answer(kb.STYLE_LABELS[nxt])
+    await _show_settings(callback, db)
+
+
 async def cfg_voice_only(callback: CallbackQuery, db: Database) -> None:
     profile = await db.ensure_profile(callback.from_user.id)
     await db.update_profile(callback.from_user.id, voice_only=not profile.voice_only)
@@ -289,6 +299,7 @@ def build() -> Router:
     router.callback_query.register(cfg_voice, F.data == kb.CFG_VOICE)
     router.callback_query.register(cfg_voice_only, F.data == kb.CFG_VOICE_ONLY)
     router.callback_query.register(cfg_translate, F.data == kb.CFG_TRANSLATE)
+    router.callback_query.register(cfg_style, F.data == kb.CFG_STYLE)
     router.callback_query.register(cfg_daily, F.data == kb.CFG_DAILY)
     router.callback_query.register(cfg_daily_set, F.data.startswith(kb.CFG_DAILY_SET))
 

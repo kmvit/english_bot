@@ -502,6 +502,7 @@ async def test_settings_shows_profile(
         "Интересы",
         "⏰ Вопрос по утрам: выкл",
         "🇷🇺 Перевод: включён",
+        "🎭 Манера: ровная",
         "🔇 Выключить голос",
         "🎧 Только голос",
     ]
@@ -956,3 +957,60 @@ async def test_profile_block_tells_model_about_translation(
     profile = await db.get_profile(USER)
     block = build_system_messages(profile)[1]["content"]
     assert "off — leave `reply_ru` empty" in block
+
+
+# --- манера учителя ----------------------------------------------------
+
+
+async def test_style_cycles_through_three_options(
+    dispatcher: Dispatcher, telegram_bot: Bot, db: Database
+):
+    await db.ensure_profile(USER)
+
+    seen = []
+    for update_id in range(1, 5):
+        await dispatcher.feed_raw_update(
+            telegram_bot, callback_update("cfg:style", update_id=update_id)
+        )
+        profile = await db.get_profile(USER)
+        seen.append(profile.tutor_style)
+
+    # По кругу и обратно к началу — отдельного экрана для трёх вариантов не нужно.
+    assert seen == ["casual", "savage", "neutral", "casual"]
+
+
+async def test_style_reaches_the_prompt(
+    dispatcher: Dispatcher, telegram_bot: Bot, db: Database
+):
+    await db.ensure_profile(USER)
+    await db.update_profile(USER, tutor_style="savage")
+
+    from bot.prompts import build_system_messages
+
+    profile = await db.get_profile(USER)
+    system = build_system_messages(profile)[0]["content"]
+
+    assert "When he gets it wrong" in system
+    # Ругань — про ошибку, не про человека: это должно быть в промпте всегда.
+    assert "Never attack him as a person" in system
+
+
+async def test_neutral_style_adds_nothing(
+    dispatcher: Dispatcher, telegram_bot: Bot, db: Database
+):
+    await db.ensure_profile(USER)
+
+    from bot.prompts import TEACHER_SYSTEM, build_system_messages
+
+    profile = await db.get_profile(USER)
+    assert build_system_messages(profile)[0]["content"] == TEACHER_SYSTEM
+
+
+async def test_broken_style_value_falls_back_to_neutral(db: Database):
+    from bot.prompts import TEACHER_SYSTEM, build_system_messages
+
+    await db.ensure_profile(USER)
+    await db.update_profile(USER, tutor_style="чепуха")
+
+    profile = await db.get_profile(USER)
+    assert build_system_messages(profile)[0]["content"] == TEACHER_SYSTEM

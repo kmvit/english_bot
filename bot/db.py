@@ -99,6 +99,7 @@ MIGRATIONS: tuple[tuple[str, str, str], ...] = (
     ("profile", "weekly_last_sent", "TEXT"),
     ("profile", "voice_only", "INTEGER NOT NULL DEFAULT 0"),
     ("profile", "translate_replies", "INTEGER NOT NULL DEFAULT 1"),
+    ("profile", "tutor_style", "TEXT NOT NULL DEFAULT 'neutral'"),
     ("errors", "drill_due", "TEXT"),
     ("errors", "drill_streak", "INTEGER NOT NULL DEFAULT 0"),
     ("pronunciation", "words", "INTEGER"),
@@ -131,6 +132,8 @@ class Profile:
     voice_only: bool = False
     #: Показывать русский перевод реплики бота сразу, без нажатия кнопки.
     translate_replies: bool = True
+    #: Манера учителя: neutral | casual | savage.
+    tutor_style: str = "neutral"
     messages_total: int = 0
     level_checked_at_message: int = 0
     #: Время ежедневного вопроса в местном часовом поясе, "HH:MM" или None.
@@ -249,6 +252,7 @@ class Database:
             voice_replies=bool(row["voice_replies"]),
             voice_only=bool(row["voice_only"]),
             translate_replies=bool(row["translate_replies"]),
+            tutor_style=row["tutor_style"] or "neutral",
             messages_total=row["messages_total"],
             level_checked_at_message=row["level_checked_at_message"],
             daily_time=row["daily_time"],
@@ -264,6 +268,7 @@ class Database:
             "voice_replies",
             "voice_only",
             "translate_replies",
+            "tutor_style",
             "messages_total",
             "level_checked_at_message",
             "daily_time",

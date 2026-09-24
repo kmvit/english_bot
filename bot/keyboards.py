@@ -28,6 +28,7 @@ CFG_INTERESTS = "cfg:interests"
 CFG_VOICE = "cfg:voice"
 CFG_VOICE_ONLY = "cfg:voiceonly"
 CFG_TRANSLATE = "cfg:translate"
+CFG_STYLE = "cfg:style"
 CFG_DAILY = "cfg:daily"
 CFG_DAILY_SET = "cfg:daily:"
 TOPIC_PICK = "topic:"
@@ -47,6 +48,14 @@ BOTTOM_BUTTONS = frozenset(
 
 # Время утреннего вопроса: готовые варианты вместо ручного ввода.
 DAILY_PRESETS = ("08:00", "09:00", "12:00", "19:00", "21:00")
+
+# Манера учителя: по кругу нажатием одной кнопки.
+STYLES = ("neutral", "casual", "savage")
+STYLE_LABELS = {
+    "neutral": "ровная",
+    "casual": "свободная, с матом",
+    "savage": "жёсткая, может и обругать",
+}
 
 # Темы на случай, когда интересы ещё не заданы.
 DEFAULT_TOPICS = ("travel", "food", "work", "movies", "sport", "plans for the weekend")
@@ -86,6 +95,12 @@ def settings_menu(profile: Profile) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="Интересы", callback_data=CFG_INTERESTS)],
         [InlineKeyboardButton(text=daily_label, callback_data=CFG_DAILY)],
         [InlineKeyboardButton(text=translate_label, callback_data=CFG_TRANSLATE)],
+        [
+            InlineKeyboardButton(
+                text=f"🎭 Манера: {STYLE_LABELS.get(profile.tutor_style, 'ровная')}",
+                callback_data=CFG_STYLE,
+            )
+        ],
         [InlineKeyboardButton(text=voice_label, callback_data=CFG_VOICE)],
     ]
     # Режим «только голос» имеет смысл лишь когда голосовые вообще включены.
