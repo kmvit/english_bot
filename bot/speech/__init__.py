@@ -17,6 +17,7 @@ log = logging.getLogger(__name__)
 WHISPER = "whisper"
 AZURE = "azure"
 PIPER = "piper"
+KOKORO = "kokoro"
 NONE = "none"
 AUTO = "auto"
 
@@ -82,7 +83,7 @@ class Speech:
         return self.synthesizer_name == AZURE
 
     async def warmup(self) -> None:
-        """Прогреть бэкенды, которые это умеют: модель Whisper и голос Piper."""
+        """Прогреть бэкенды, которые это умеют: модель распознавания и голос."""
         for backend in (self._recognizer, self._synthesizer):
             warmup = getattr(backend, "warmup", None)
             if warmup is not None:
@@ -122,6 +123,10 @@ def _build_synthesizer(config: Config) -> Synthesizer | None:
     if choice == AZURE:
         log.warning("TTS_BACKEND=azure, но ключи Azure не заданы — голосовые ответы выключены")
         return None
+    if choice == KOKORO:
+        from .kokoro import KokoroSynthesizer
+
+        return KokoroSynthesizer(config)
     if choice in (PIPER, AUTO):
         from .piper import PiperSynthesizer
 

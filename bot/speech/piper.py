@@ -8,19 +8,16 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import shutil
-import urllib.error
-import urllib.request
 from pathlib import Path
 from typing import Any, Callable
 
 from ..config import Config
 from . import PIPER, SpeechError
+from .downloads import download
 
 log = logging.getLogger(__name__)
 
 VOICES_URL = "https://huggingface.co/rhasspy/piper-voices/resolve/main"
-DOWNLOAD_TIMEOUT = 300
 
 
 def voice_url(voice: str) -> str:
@@ -63,27 +60,10 @@ class PiperSynthesizer:
 
     def _ensure_files(self) -> Path:
         """Скачать веса и конфиг голоса, если их ещё нет."""
-        model_path = self.model_path
-        config_path = model_path.with_suffix(".onnx.json")
-        if model_path.exists() and config_path.exists():
-            return model_path
-
-        model_path.parent.mkdir(parents=True, exist_ok=True)
         base = voice_url(self._config.piper_voice)
-        for url, target in ((base, model_path), (f"{base}.json", config_path)):
-            if target.exists():
-                continue
-            log.info("Скачиваю %s", target.name)
-            tmp = target.with_suffix(target.suffix + ".part")
-            try:
-                with urllib.request.urlopen(url, timeout=DOWNLOAD_TIMEOUT) as response:
-                    with tmp.open("wb") as handle:
-                        shutil.copyfileobj(response, handle)
-            except (urllib.error.URLError, OSError, TimeoutError) as exc:
-                tmp.unlink(missing_ok=True)
-                raise SpeechError(f"Не удалось скачать голос Piper: {exc}") from exc
-            tmp.replace(target)
-        return model_path
+        download(base, self.model_path)
+        download(f"{base}.json", self.model_path.with_suffix(".onnx.json"))
+        return self.model_path
 
     async def _voice_ready(self) -> Any:
         if self._voice is None:

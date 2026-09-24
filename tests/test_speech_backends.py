@@ -8,7 +8,18 @@ from types import SimpleNamespace
 import pytest
 
 from bot.config import Config
-from bot.speech import AZURE, NONE, PIPER, WHISPER, Speech, SpeechError, TTSUnavailable, build_speech
+from bot.speech import (
+    AZURE,
+    KOKORO,
+    NONE,
+    PIPER,
+    WHISPER,
+    Speech,
+    SpeechError,
+    TTSUnavailable,
+    build_speech,
+)
+from bot.speech.kokoro import KokoroSynthesizer
 from bot.speech.piper import PiperSynthesizer, voice_url
 from bot.speech.whisper import NO_SPEECH_LIMIT, WhisperRecognizer
 
@@ -255,7 +266,7 @@ async def test_existing_files_are_not_downloaded(voice_files: Config, tmp_path, 
     def forbidden(*args, **kwargs):
         raise AssertionError("скачивание не должно запускаться")
 
-    monkeypatch.setattr("bot.speech.piper.urllib.request.urlopen", forbidden)
+    monkeypatch.setattr("bot.speech.downloads.urllib.request.urlopen", forbidden)
     piper = PiperSynthesizer(voice_files, voice_factory=lambda path: FakeVoice())
 
     await piper.synthesize("hi", tmp_path / "a.wav")
@@ -265,7 +276,7 @@ async def test_download_failure_is_reported(config: Config, tmp_path, monkeypatc
     def broken(*args, **kwargs):
         raise OSError("сеть недоступна")
 
-    monkeypatch.setattr("bot.speech.piper.urllib.request.urlopen", broken)
+    monkeypatch.setattr("bot.speech.downloads.urllib.request.urlopen", broken)
     piper = PiperSynthesizer(
         replace(config, piper_model_dir=tmp_path / "voices"),
         voice_factory=lambda path: FakeVoice(),
@@ -279,7 +290,7 @@ async def test_warmup_survives_download_failure(config: Config, tmp_path, monkey
     def broken(*args, **kwargs):
         raise OSError("сеть недоступна")
 
-    monkeypatch.setattr("bot.speech.piper.urllib.request.urlopen", broken)
+    monkeypatch.setattr("bot.speech.downloads.urllib.request.urlopen", broken)
     piper = PiperSynthesizer(
         replace(config, piper_model_dir=tmp_path / "voices"),
         voice_factory=lambda path: FakeVoice(),
@@ -294,7 +305,7 @@ async def test_partial_download_is_not_left_behind(config: Config, tmp_path, mon
     def broken(*args, **kwargs):
         raise OSError("обрыв связи")
 
-    monkeypatch.setattr("bot.speech.piper.urllib.request.urlopen", broken)
+    monkeypatch.setattr("bot.speech.downloads.urllib.request.urlopen", broken)
     piper = PiperSynthesizer(
         replace(config, piper_model_dir=model_dir), voice_factory=lambda path: FakeVoice()
     )
@@ -321,3 +332,104 @@ async def test_tempo_is_passed_to_piper(voice_files: Config, tmp_path):
 async def test_default_tempo_is_slower_than_native(config: Config):
     """По умолчанию голос замедлен: это бот для изучающих язык."""
     assert config.tts_length_scale > 1.0
+
+
+# --- Kokoro ------------------------------------------------------------
+
+
+class FakeEngine:
+    """Заменяет kokoro_onnx.Kokoro: отдаёт тишину нужной длины."""
+
+    def __init__(self):
+        self.calls: list[dict] = []
+
+    def create(self, text, voice, speed, lang):
+        self.calls.append({"text": text, "voice": voice, "speed": speed, "lang": lang})
+        return [0.0] * 2400, 24000
+
+
+@pytest.fixture
+def kokoro_files(config: Config, tmp_path) -> Config:
+    model_dir = tmp_path / "kokoro"
+    model_dir.mkdir()
+    (model_dir / "kokoro-v1.0.onnx").write_bytes(b"weights")
+    (model_dir / "voices-v1.0.bin").write_bytes(b"voices")
+    return replace(config, kokoro_model_dir=model_dir, tts_backend="kokoro")
+
+
+def test_kokoro_is_picked_when_asked(kokoro_files: Config):
+    speech = build_speech(kokoro_files)
+
+    assert speech.synthesizer_name == KOKORO
+    assert speech.tts_suffix == ".wav"
+    assert speech.tts_is_billable is False
+
+
+async def test_kokoro_synthesizes(kokoro_files: Config, tmp_path):
+    engine = FakeEngine()
+    kokoro = KokoroSynthesizer(kokoro_files, engine_factory=lambda m, v: engine)
+
+    chars = await kokoro.synthesize("Hello there", tmp_path / "a.wav")
+
+    assert chars == len("Hello there")
+    assert engine.calls[0]["text"] == "Hello there"
+    assert engine.calls[0]["voice"] == "af_bella"
+    assert (tmp_path / "a.wav").exists()
+
+
+@pytest.mark.parametrize(
+    "length_scale,expected_speed",
+    [(1.0, 1.0), (1.15, pytest.approx(0.87, abs=0.01)), (1.3, pytest.approx(0.77, abs=0.01))],
+)
+def test_slowdown_is_converted_to_kokoro_speed(
+    kokoro_files: Config, length_scale, expected_speed
+):
+    """Настройка везде значит одно: 1.15 — на 15% медленнее, на любом движке."""
+    kokoro = KokoroSynthesizer(replace(kokoro_files, tts_length_scale=length_scale))
+
+    assert kokoro.speed == expected_speed
+
+
+def test_zero_scale_does_not_divide_by_zero(kokoro_files: Config):
+    kokoro = KokoroSynthesizer(replace(kokoro_files, tts_length_scale=0.0))
+
+    assert kokoro.speed == 1.0
+
+
+async def test_kokoro_engine_loaded_once(kokoro_files: Config, tmp_path):
+    loads = []
+
+    def factory(model, voices):
+        loads.append((model, voices))
+        return FakeEngine()
+
+    kokoro = KokoroSynthesizer(kokoro_files, engine_factory=factory)
+    await kokoro.synthesize("one", tmp_path / "a.wav")
+    await kokoro.synthesize("two", tmp_path / "b.wav")
+
+    assert len(loads) == 1
+
+
+async def test_kokoro_download_failure_is_reported(config: Config, tmp_path, monkeypatch):
+    def broken(*args, **kwargs):
+        raise OSError("сеть недоступна")
+
+    monkeypatch.setattr("bot.speech.downloads.urllib.request.urlopen", broken)
+    kokoro = KokoroSynthesizer(
+        replace(config, kokoro_model_dir=tmp_path / "kokoro"),
+        engine_factory=lambda m, v: FakeEngine(),
+    )
+
+    with pytest.raises(SpeechError, match="скачать"):
+        await kokoro.synthesize("hi", tmp_path / "a.wav")
+
+
+async def test_kokoro_synthesis_failure_becomes_speech_error(kokoro_files: Config, tmp_path):
+    class Broken:
+        def create(self, *a, **k):
+            raise RuntimeError("модель упала")
+
+    kokoro = KokoroSynthesizer(kokoro_files, engine_factory=lambda m, v: Broken())
+
+    with pytest.raises(SpeechError):
+        await kokoro.synthesize("hi", tmp_path / "a.wav")

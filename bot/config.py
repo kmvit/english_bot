@@ -65,13 +65,15 @@ class Config:
 
     # --- речь ---
     speech_backend: str = "whisper"      # whisper | azure
-    tts_backend: str = "auto"            # auto | azure | piper | none
+    tts_backend: str = "auto"            # auto | azure | kokoro | piper | none
     whisper_model: str = "small"
     whisper_device: str = "cpu"
     whisper_compute_type: str = "int8"
     whisper_cpu_threads: int = 0         # 0 — на усмотрение ctranslate2
     piper_voice: str = "en_US-lessac-medium"
     piper_model_dir: Path = Path("data/voices")
+    kokoro_voice: str = "af_bella"
+    kokoro_model_dir: Path = Path("data/kokoro")
     # Темп озвучки: 1.0 — как записан голос, меньше — быстрее, больше —
     # медленнее. Ученику ниже B1 разборчивость важнее естественности.
     tts_length_scale: float = 1.3
@@ -140,6 +142,8 @@ def load_config() -> Config:
         whisper_cpu_threads=_int("WHISPER_CPU_THREADS", 0),
         piper_voice=os.getenv("PIPER_VOICE", "en_US-lessac-medium"),
         piper_model_dir=Path(os.getenv("PIPER_MODEL_DIR", "data/voices")),
+        kokoro_voice=os.getenv("KOKORO_VOICE", "af_bella"),
+        kokoro_model_dir=Path(os.getenv("KOKORO_MODEL_DIR", "data/kokoro")),
         tts_length_scale=_float("TTS_LENGTH_SCALE", 1.3),
         azure_speech_key=azure_key,
         azure_speech_region=azure_region,

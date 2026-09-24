@@ -16,7 +16,8 @@ ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     DB_PATH=/app/data/bot.db \
     HF_HOME=/app/data/models \
-    PIPER_MODEL_DIR=/app/data/voices
+    PIPER_MODEL_DIR=/app/data/voices \
+    KOKORO_MODEL_DIR=/app/data/kokoro
 
 WORKDIR /app
 
