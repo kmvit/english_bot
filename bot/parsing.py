@@ -97,6 +97,32 @@ REPLY_SCHEMA: dict[str, Any] = {
     "additionalProperties": False,
 }
 
+LOOKUP_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "term": {
+            "type": "string",
+            "description": "Словарная форма выделенного слова или фразы.",
+        },
+        "translation": {"type": "string", "description": "Русский перевод, 1-3 слова."},
+        "meaning": {"type": "string", "description": "Одна строка по-русски: что значит."},
+        "ipa": {"type": "string", "description": "Транскрипция без слэшей; пусто для длинных фраз."},
+        "example": {"type": "string"},
+        "example_ru": {"type": "string"},
+        "note": {"type": "string", "description": "Ответ на вопрос ученика или грабли; можно пусто."},
+    },
+    "required": [
+        "term",
+        "translation",
+        "meaning",
+        "ipa",
+        "example",
+        "example_ru",
+        "note",
+    ],
+    "additionalProperties": False,
+}
+
 _CORRECTION_ALIASES = {
     "original": ("original", "wrong", "said", "before", "student"),
     "corrected": ("corrected", "correct", "right", "after", "fixed"),
@@ -147,6 +173,19 @@ class NewWord:
     word: str
     meaning: str = ""
     example: str = ""
+
+
+@dataclass
+class Lookup:
+    """Разбор слова или фразы, которую ученик выделил в сообщении."""
+
+    term: str
+    translation: str = ""
+    meaning: str = ""
+    ipa: str = ""
+    example: str = ""
+    example_ru: str = ""
+    note: str = ""
 
 
 @dataclass
@@ -319,6 +358,34 @@ def parse_teacher_reply(text: str) -> TeacherReply:
         reply_ru=reply_ru,
         expand=expand,
         raw_json_ok=True,
+    )
+
+
+def parse_lookup(text: str, fallback_term: str = "") -> Lookup | None:
+    """Разобрать карточку слова. None — если модель ответила не по делу.
+
+    В отличие от реплики учителя, прозаический ответ здесь бесполезен:
+    без `term` нечего сохранять в словарь, а карточку не из чего собрать.
+    """
+    payload = _loads(_strip_fence((text or "").strip()))
+    if payload is None:
+        return None
+
+    def field(*names: str) -> str:
+        value = _pick(payload, names)
+        return value
+
+    term = field("term", "word", "phrase", "lemma") or fallback_term.strip()
+    if not term:
+        return None
+    return Lookup(
+        term=term,
+        translation=field("translation", "ru", "russian"),
+        meaning=field("meaning", "definition", "sense"),
+        ipa=field("ipa", "transcription", "phoneme").strip("/"),
+        example=field("example", "sentence", "sample"),
+        example_ru=field("example_ru", "example_russian", "sample_ru"),
+        note=field("note", "tip", "comment"),
     )
 
 

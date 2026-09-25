@@ -187,3 +187,78 @@ def test_translation_is_skipped_in_voice_only_mode():
     text = render_reply(reply, include_conversation=False)
 
     assert "Рад слышать!" not in text
+
+
+def test_lookup_card_shows_translation_sound_and_example():
+    from bot.parsing import Lookup
+    from bot.formatting import render_lookup
+
+    text = render_lookup(
+        Lookup(
+            term="grab",
+            translation="схватить",
+            meaning="взять быстро",
+            ipa="ɡræb",
+            example="Let me grab my jacket.",
+            example_ru="Дай схвачу куртку.",
+            note="Дополнение без предлога.",
+        )
+    )
+
+    assert "<b>grab</b> — схватить" in text
+    assert "/ɡræb/" in text
+    assert "Let me grab my jacket." in text
+    assert "Дай схвачу куртку." in text
+    assert "Дополнение без предлога." in text
+    # Подпись — последняя строка: по ней кнопка «не сохранять» её и заменяет.
+    assert text.splitlines()[-1] == "➕ <i>Сохранил в словарь — спрошу на тренировке</i>"
+
+
+def test_lookup_card_survives_empty_fields():
+    from bot.parsing import Lookup
+    from bot.formatting import render_lookup
+
+    text = render_lookup(Lookup(term="grab"))
+    assert "grab" in text
+    assert "//" not in text
+
+
+def test_lookup_card_escapes_html():
+    from bot.parsing import Lookup
+    from bot.formatting import render_lookup
+
+    text = render_lookup(Lookup(term="<b>", meaning="a < b"))
+    assert "&lt;b&gt;" in text
+    assert "a &lt; b" in text
+
+
+def test_word_task_asks_to_fill_the_gap():
+    from bot.formatting import render_drill_task
+
+    text = render_drill_task(
+        2, 3, {"kind": "word", "sentence": "I want to ___ it.", "focus": "grab — схватить"}
+    )
+    assert "Вставь пропущенное слово" in text
+    assert "grab — схватить" in text
+
+
+def test_error_task_keeps_its_wording():
+    from bot.formatting import render_drill_task
+
+    text = render_drill_task(1, 3, {"sentence": "I have cat.", "focus": "артикль"})
+    assert "Найди ошибку" in text
+
+
+def test_empty_dictionary_explains_how_to_fill_it():
+    from bot.formatting import render_words
+
+    assert "Ответить" in render_words([], 0)
+
+
+def test_dictionary_mentions_words_due_for_drill():
+    from bot.db import VocabWord
+    from bot.formatting import render_words
+
+    words = [VocabWord("grab", "схватить", None, 0, "2026-01-01")]
+    assert "К повторению готово 2" in render_words(words, total=5, due=2)
+    assert "К повторению" not in render_words(words, total=5, due=0)

@@ -106,6 +106,9 @@ MIGRATIONS: tuple[tuple[str, str, str], ...] = (
     ("pronunciation", "wpm", "REAL"),
     ("pronunciation", "pauses", "INTEGER"),
     ("pronunciation", "pause_ratio", "REAL"),
+    ("vocabulary", "drill_due", "TEXT"),
+    ("vocabulary", "drill_streak", "INTEGER NOT NULL DEFAULT 0"),
+    ("vocabulary", "source", "TEXT NOT NULL DEFAULT 'tutor'"),
 )
 
 
@@ -167,6 +170,12 @@ class VocabWord:
     example: str | None
     seen_count: int
     added_at: str
+    id: int = 0
+    #: Когда слово пора повторить; None — ещё ни разу не спрашивали.
+    drill_due: str | None = None
+    drill_streak: int = 0
+    #: Откуда слово взялось: `tutor` — ввёл учитель, `asked` — спросил ученик.
+    source: str = "tutor"
 
 
 @dataclass
@@ -518,23 +527,118 @@ class Database:
         )
         await self.conn.commit()
 
+    async def save_word(
+        self,
+        user_id: int,
+        word: str,
+        meaning: str | None = None,
+        example: str | None = None,
+        source: str = "tutor",
+    ) -> int:
+        """Сохранить одно слово и вернуть его id — по нему работает кнопка «убрать».
+
+        Слово, о котором спросил сам ученик, сразу становится готовым к
+        повторению: он встретил его только что, и первый повтор нужен скоро.
+        """
+        word = word.strip()
+        if not word:
+            return 0
+        key = _norm_key(word)
+        now = _ts()
+        await self.conn.execute(
+            "INSERT INTO vocabulary "
+            "(user_id, word, norm_word, meaning, example, added_at, source, drill_due) "
+            "VALUES (?,?,?,?,?,?,?,?) "
+            "ON CONFLICT(user_id, norm_word) DO UPDATE SET "
+            "meaning = COALESCE(excluded.meaning, vocabulary.meaning), "
+            "example = COALESCE(excluded.example, vocabulary.example), "
+            "source = excluded.source",
+            (user_id, word, key, meaning, example, now, source, now),
+        )
+        await self.conn.commit()
+        # Отдельным запросом, а не по lastrowid: при обновлении существующей
+        # строки он не указывает на неё.
+        async with self.conn.execute(
+            "SELECT id FROM vocabulary WHERE user_id = ? AND norm_word = ?",
+            (user_id, key),
+        ) as cursor:
+            row = await cursor.fetchone()
+        return int(row["id"]) if row else 0
+
+    async def delete_word(self, user_id: int, word_id: int) -> str | None:
+        """Убрать слово из словаря. Возвращает убранное слово или None."""
+        async with self.conn.execute(
+            "SELECT word FROM vocabulary WHERE id = ? AND user_id = ?",
+            (word_id, user_id),
+        ) as cursor:
+            row = await cursor.fetchone()
+        if row is None:
+            return None
+        await self.conn.execute(
+            "DELETE FROM vocabulary WHERE id = ? AND user_id = ?", (word_id, user_id)
+        )
+        await self.conn.commit()
+        return row["word"]
+
+    @staticmethod
+    def _vocab_word(row: Any) -> VocabWord:
+        return VocabWord(
+            word=row["word"],
+            meaning=row["meaning"],
+            example=row["example"],
+            seen_count=row["seen_count"],
+            added_at=row["added_at"],
+            id=row["id"],
+            drill_due=row["drill_due"],
+            drill_streak=row["drill_streak"] or 0,
+            source=row["source"] or "tutor",
+        )
+
     async def recent_words(self, user_id: int, limit: int = 20) -> list[VocabWord]:
         async with self.conn.execute(
-            "SELECT word, meaning, example, seen_count, added_at FROM vocabulary "
-            "WHERE user_id = ? ORDER BY id DESC LIMIT ?",
+            "SELECT * FROM vocabulary WHERE user_id = ? ORDER BY id DESC LIMIT ?",
             (user_id, limit),
         ) as cursor:
             rows = await cursor.fetchall()
-        return [
-            VocabWord(
-                word=row["word"],
-                meaning=row["meaning"],
-                example=row["example"],
-                seen_count=row["seen_count"],
-                added_at=row["added_at"],
-            )
-            for row in rows
-        ]
+        return [self._vocab_word(row) for row in rows]
+
+    async def words_due_for_drill(self, user_id: int, limit: int = 2) -> list[VocabWord]:
+        """Слова, которые пора повторить. Правила те же, что и у ошибок."""
+        now = _ts()
+        async with self.conn.execute(
+            "SELECT * FROM vocabulary WHERE user_id = ? "
+            "AND (drill_due IS NULL OR drill_due <= ?) "
+            "ORDER BY drill_streak ASC, added_at DESC LIMIT ?",
+            (user_id, now, limit),
+        ) as cursor:
+            rows = await cursor.fetchall()
+        return [self._vocab_word(row) for row in rows]
+
+    async def record_word_drill_result(self, word_id: int, correct: bool) -> None:
+        """Слово вспомнили — следующий раз нескоро; забыли — завтра снова."""
+        async with self.conn.execute(
+            "SELECT drill_streak FROM vocabulary WHERE id = ?", (word_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+        if row is None:
+            return
+        streak = (row["drill_streak"] or 0) + 1 if correct else 0
+        due = utc_now() + timedelta(days=DRILL_INTERVALS[min(streak, len(DRILL_INTERVALS) - 1)])
+        await self.conn.execute(
+            "UPDATE vocabulary SET drill_streak = ?, drill_due = ?, "
+            "seen_count = seen_count + 1, last_seen = ? WHERE id = ?",
+            (streak, _ts(due), _ts(), word_id),
+        )
+        await self.conn.commit()
+
+    async def words_due_total(self, user_id: int) -> int:
+        async with self.conn.execute(
+            "SELECT COUNT(*) AS n FROM vocabulary WHERE user_id = ? "
+            "AND (drill_due IS NULL OR drill_due <= ?)",
+            (user_id, _ts()),
+        ) as cursor:
+            row = await cursor.fetchone()
+        return int(row["n"]) if row else 0
 
     async def words_total(self, user_id: int) -> int:
         async with self.conn.execute(

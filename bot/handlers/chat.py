@@ -66,6 +66,9 @@ async def _reply_turn(
             result.text, reply_markup=kb.reply_actions(result.translated)
         )
 
+    if result.hint:
+        await message.answer(result.hint)
+
     if not (result.voice_enabled and result.spoken_text):
         return
     with tempfile.TemporaryDirectory(prefix="tts-") as tmp:

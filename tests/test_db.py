@@ -255,3 +255,70 @@ async def test_fluency_ignores_records_without_metrics(db: Database):
     await db.add_pronunciation(USER, {"overall": 70.0}, 5.0)
 
     assert (await db.fluency_progress(USER, days=7)).samples == 0
+
+
+# --- словарь: сохранение и повторение -----------------------------------
+
+
+async def test_saved_word_is_due_right_away(db: Database):
+    """Слово, о котором спросил ученик, спрашиваем на ближайшей тренировке."""
+    word_id = await db.save_word(USER, "grab", "схватить", "Let me grab it.", "asked")
+
+    due = await db.words_due_for_drill(USER)
+    assert [(w.id, w.word, w.source) for w in due] == [(word_id, "grab", "asked")]
+    assert await db.words_due_total(USER) == 1
+
+
+async def test_saving_same_word_twice_keeps_one_entry(db: Database):
+    first = await db.save_word(USER, "grab", "схватить", None, "asked")
+    second = await db.save_word(USER, "Grab", None, "New example.", "asked")
+
+    assert first == second
+    words = await db.recent_words(USER)
+    assert len(words) == 1
+    # Пустые поля не затирают то, что уже было разобрано.
+    assert (words[0].meaning, words[0].example) == ("схватить", "New example.")
+
+
+async def test_deleted_word_leaves_the_dictionary(db: Database):
+    word_id = await db.save_word(USER, "grab", "схватить", None, "asked")
+
+    assert await db.delete_word(USER, word_id) == "grab"
+    assert await db.recent_words(USER) == []
+    assert await db.delete_word(USER, word_id) is None
+
+
+async def test_word_is_not_deleted_for_another_user(db: Database):
+    word_id = await db.save_word(USER, "grab", "схватить", None, "asked")
+
+    assert await db.delete_word(USER + 1, word_id) is None
+    assert len(await db.recent_words(USER)) == 1
+
+
+async def test_recalled_word_comes_back_later(db: Database):
+    word_id = await db.save_word(USER, "grab", "схватить", None, "asked")
+
+    await db.record_word_drill_result(word_id, correct=True)
+
+    word = (await db.recent_words(USER))[0]
+    assert word.drill_streak == 1
+    assert word.seen_count == 1
+    assert await db.words_due_for_drill(USER) == []
+
+
+async def test_forgotten_word_resets_the_streak(db: Database):
+    word_id = await db.save_word(USER, "grab", "схватить", None, "asked")
+    await db.record_word_drill_result(word_id, correct=True)
+
+    await db.record_word_drill_result(word_id, correct=False)
+
+    assert (await db.recent_words(USER))[0].drill_streak == 0
+
+
+async def test_never_drilled_words_go_first(db: Database):
+    old = await db.save_word(USER, "commute", "поездка", None, "tutor")
+    await db.record_word_drill_result(old, correct=False)
+    await db.save_word(USER, "grab", "схватить", None, "asked")
+
+    due = await db.words_due_for_drill(USER, limit=1)
+    assert [w.word for w in due] == ["grab"]

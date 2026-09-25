@@ -139,6 +139,34 @@ def voice_update(duration: int, user_id: int = USER, update_id: int = 1) -> dict
     }
 
 
+def quote_update(
+    quote: str,
+    text: str = "?",
+    source: str = "Let me grab my jacket and we can go.",
+    user_id: int = USER,
+    update_id: int = 1,
+) -> dict:
+    """Ученик выделил кусок сообщения бота и нажал «Ответить»."""
+    return {
+        "update_id": update_id,
+        "message": {
+            "message_id": update_id,
+            "date": 1_700_000_000,
+            "chat": {"id": user_id, "type": "private"},
+            "from": {"id": user_id, "is_bot": False, "first_name": "Student"},
+            "text": text,
+            "quote": {"text": quote, "position": 0, "is_manual": True},
+            "reply_to_message": {
+                "message_id": update_id - 1,
+                "date": 1_700_000_000,
+                "chat": {"id": user_id, "type": "private"},
+                "from": {"id": 42, "is_bot": True, "first_name": "Bot"},
+                "text": source,
+            },
+        },
+    }
+
+
 def callback_update(
     data: str,
     user_id: int = USER,
@@ -1021,3 +1049,194 @@ async def test_broken_style_value_falls_back_to_neutral(db: Database):
     assert system.startswith(NEUTRAL_ROLE)
     # Заглушка должна быть заменена всегда, иначе она уедет в промпт как есть.
     assert ROLE_PLACEHOLDER not in system
+
+
+# --- разбор выделенного фрагмента --------------------------------------
+
+
+async def test_quote_explains_fragment_and_saves_word(
+    dispatcher: Dispatcher, telegram_bot: Bot, session: FakeSession, db: Database
+):
+    await dispatcher.feed_raw_update(telegram_bot, quote_update("grab", text="?"))
+
+    call = dispatcher["_teacher"].lookup_calls[0]
+    assert call["fragment"] == "grab"
+    # Значение многозначного слова выбирается по предложению, поэтому оно
+    # уходит модели вместе с фрагментом.
+    assert "jacket" in call["context"]
+    assert call["question"] == "?"
+
+    card = session.texts()[0]
+    assert "grab" in card and "схватить" in card
+    assert "ɡræb" in card
+    assert "Сохранил в словарь" in card
+
+    saved = await db.recent_words(USER)
+    assert [(w.word, w.meaning, w.source) for w in saved] == [
+        ("grab", "схватить", "asked")
+    ]
+
+
+async def test_quote_does_not_start_a_conversation_turn(
+    dispatcher: Dispatcher, telegram_bot: Bot, session: FakeSession
+):
+    """Выделенный фрагмент — вопрос про слово, а не реплика в диалоге."""
+    await dispatcher.feed_raw_update(telegram_bot, quote_update("grab"))
+
+    assert dispatcher["_teacher"].calls == []
+
+
+async def test_quoted_question_reaches_the_model(
+    dispatcher: Dispatcher, telegram_bot: Bot
+):
+    await dispatcher.feed_raw_update(
+        telegram_bot, quote_update("grab", text="почему тут нет предлога?")
+    )
+    assert dispatcher["_teacher"].lookup_calls[0]["question"] == "почему тут нет предлога?"
+
+
+async def test_too_long_quote_is_refused_without_asking_model(
+    dispatcher: Dispatcher, telegram_bot: Bot, session: FakeSession, db: Database
+):
+    await dispatcher.feed_raw_update(telegram_bot, quote_update("word " * 60))
+
+    assert dispatcher["_teacher"].lookup_calls == []
+    assert "слишком длинный" in session.texts()[0]
+    assert await db.recent_words(USER) == []
+
+
+async def test_lookup_survives_model_failure(
+    dispatcher: Dispatcher, telegram_bot: Bot, session: FakeSession, db: Database
+):
+    dispatcher["_teacher"].fail = True
+    await dispatcher.feed_raw_update(telegram_bot, quote_update("grab"))
+
+    assert "не отвечает" in session.texts()[0]
+    assert await db.recent_words(USER) == []
+
+
+async def test_unparsed_lookup_says_so(
+    dispatcher: Dispatcher, telegram_bot: Bot, session: FakeSession, db: Database
+):
+    dispatcher["_teacher"].lookup_value = None
+    await dispatcher.feed_raw_update(telegram_bot, quote_update("grab"))
+
+    assert "Не разобрал" in session.texts()[0]
+    assert await db.recent_words(USER) == []
+
+
+async def test_drop_button_removes_the_saved_word(
+    dispatcher: Dispatcher, telegram_bot: Bot, session: FakeSession, db: Database
+):
+    await dispatcher.feed_raw_update(telegram_bot, quote_update("grab"))
+    word_id = (await db.recent_words(USER))[0].id
+
+    await dispatcher.feed_raw_update(
+        telegram_bot,
+        callback_update(
+            f"word:drop:{word_id}",
+            update_id=2,
+            message_text="📖 grab — схватить\n\n➕ Сохранил в словарь — спрошу на тренировке",
+        ),
+    )
+
+    assert await db.recent_words(USER) == []
+    # Карточка не должна и дальше обещать спросить слово на тренировке.
+    assert "Убрал из словаря" in session.texts()[-1]
+
+
+async def test_drop_of_missing_word_does_not_crash(
+    dispatcher: Dispatcher, telegram_bot: Bot, session: FakeSession
+):
+    await dispatcher.feed_raw_update(telegram_bot, callback_update("word:drop:999"))
+    assert "AnswerCallbackQuery" in session.method_names()
+
+
+# --- слова в тренировке -------------------------------------------------
+
+
+async def test_drill_mixes_words_with_mistakes(
+    dispatcher: Dispatcher, telegram_bot: Bot, session: FakeSession, db: Database
+):
+    await db.record_errors(USER, [("grammar", "пропускает артикль")])
+    await db.save_word(USER, "grab", "схватить", "Let me grab it.", source="asked")
+
+    await dispatcher.feed_raw_update(telegram_bot, text_update("/drill"))
+
+    assert dispatcher["_teacher"].word_drill_calls == [[("grab", "схватить")]]
+    # Задания приходят по одному: чтобы увидеть второе, надо ответить на первое.
+    await dispatcher.feed_raw_update(
+        telegram_bot, text_update("Fixed it.", update_id=2)
+    )
+    tasks = [t for t in session.texts() if "Задание" in t]
+    assert "Найди ошибку" in tasks[0]
+    assert "Вставь пропущенное слово" in tasks[1]
+
+
+async def test_drill_on_words_alone_still_happens(
+    dispatcher: Dispatcher, telegram_bot: Bot, session: FakeSession, db: Database
+):
+    """Ошибок может не быть, а слова к повторению — быть."""
+    await db.save_word(USER, "grab", "схватить", source="asked")
+
+    await dispatcher.feed_raw_update(telegram_bot, text_update("/drill"))
+
+    assert dispatcher["_teacher"].drill_calls == []
+    assert any("Вставь пропущенное слово" in text for text in session.texts())
+
+
+async def test_correct_word_answer_postpones_it(
+    dispatcher: Dispatcher, telegram_bot: Bot, session: FakeSession, db: Database
+):
+    await db.save_word(USER, "grab", "схватить", source="asked")
+    await dispatcher.feed_raw_update(telegram_bot, text_update("/drill"))
+
+    await dispatcher.feed_raw_update(
+        telegram_bot, text_update("I want to grab it now.", update_id=2)
+    )
+
+    word = (await db.recent_words(USER))[0]
+    assert word.drill_streak == 1
+    assert await db.words_due_for_drill(USER) == []
+
+
+async def test_wrong_word_answer_keeps_it_due(
+    dispatcher: Dispatcher, telegram_bot: Bot, session: FakeSession, db: Database
+):
+    dispatcher["_teacher"].drill_correct = False
+    await db.save_word(USER, "grab", "схватить", source="asked")
+    await dispatcher.feed_raw_update(telegram_bot, text_update("/drill"))
+
+    await dispatcher.feed_raw_update(
+        telegram_bot, text_update("I want to take it now.", update_id=2)
+    )
+
+    assert (await db.recent_words(USER))[0].drill_streak == 0
+
+
+async def test_hint_about_highlighting_comes_once(
+    dispatcher: Dispatcher, telegram_bot: Bot, session: FakeSession
+):
+    """Про жест надо рассказать: сам он не обнаруживается."""
+    from bot.service import HINT_AT_MESSAGE
+
+    for index in range(1, HINT_AT_MESSAGE + 2):
+        await dispatcher.feed_raw_update(
+            telegram_bot, text_update("hello", update_id=index)
+        )
+
+    hints = [text for text in session.texts() if "Выдели" in text]
+    assert len(hints) == 1
+
+
+async def test_quote_works_during_a_drill(
+    dispatcher: Dispatcher, telegram_bot: Bot, session: FakeSession, db: Database
+):
+    """Непонятное слово в задании разбирается, не сбивая тренировку."""
+    await db.record_errors(USER, [("grammar", "пропускает артикль")])
+    await dispatcher.feed_raw_update(telegram_bot, text_update("/drill"))
+
+    await dispatcher.feed_raw_update(telegram_bot, quote_update("grab", update_id=2))
+
+    assert dispatcher["_teacher"].lookup_calls
+    assert dispatcher["_teacher"].check_calls == []

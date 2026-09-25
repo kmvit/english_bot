@@ -7,7 +7,7 @@ from pathlib import Path
 from bot.assessment import Assessment
 from bot.costs import TokenUsage
 from bot.llm import LLMError, LLMResult
-from bot.parsing import TeacherReply
+from bot.parsing import Lookup, TeacherReply
 
 
 class FakeTeacher:
@@ -21,8 +21,19 @@ class FakeTeacher:
         self.plain_calls: list[dict] = []
         self.plain_value = "готовый текст от модели"
         self.drill_calls: list[list[str]] = []
+        self.word_drill_calls: list[list[tuple[str, str]]] = []
         self.check_calls: list[dict] = []
         self.drill_correct = True
+        self.lookup_calls: list[dict] = []
+        self.lookup_value: Lookup | None = Lookup(
+            term="grab",
+            translation="схватить",
+            meaning="взять быстро, без церемоний",
+            ipa="ɡræb",
+            example="Let me grab my jacket.",
+            example_ru="Дай схвачу куртку.",
+            note="После grab дополнение идёт без предлога.",
+        )
         self.fail = False
 
     async def reply(self, profile, recurring_errors, history, user_turn, known_words=()):
@@ -62,6 +73,32 @@ class FakeTeacher:
             for m in mistakes
         ]
         return exercises, TokenUsage(input_tokens=40, output_tokens=20), "openai/test-model"
+
+    async def make_word_drill(self, profile, words):
+        self.word_drill_calls.append([tuple(w) for w in words])
+        if self.fail:
+            raise LLMError("модель недоступна")
+        exercises = [
+            {
+                "sentence": f"I want to ___ it now ({word}).",
+                "answer": f"I want to {word} it now.",
+                "focus": f"{word} — {meaning}",
+            }
+            for word, meaning in words
+        ]
+        return exercises, TokenUsage(input_tokens=40, output_tokens=20), "openai/test-model"
+
+    async def lookup(self, fragment, context="", question=""):
+        self.lookup_calls.append(
+            {"fragment": fragment, "context": context, "question": question}
+        )
+        if self.fail:
+            raise LLMError("модель недоступна")
+        return (
+            self.lookup_value,
+            TokenUsage(input_tokens=25, output_tokens=60),
+            "openai/test-model",
+        )
 
     async def check_drill(self, sentence, answer, student, focus):
         self.check_calls.append(

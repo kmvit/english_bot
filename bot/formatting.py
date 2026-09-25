@@ -5,7 +5,7 @@ from html import escape
 from typing import Sequence
 
 from .db import ErrorStat, FluencyStat, ProgressStat, Profile, VocabWord
-from .parsing import TeacherReply
+from .parsing import Lookup, TeacherReply
 
 TELEGRAM_LIMIT = 4096
 
@@ -14,6 +14,23 @@ ERROR_TYPE_RU = {
     "vocabulary": "лексика",
     "pronunciation": "произношение",
 }
+
+#: Подсказка про жест: без неё выделение текста так и останется незамеченным.
+LOOKUP_HINT = (
+    "💡 Непонятное слово или фраза в моём сообщении? Выдели её и нажми "
+    "«Ответить» — разберу и добавлю в словарь. Можно сразу дописать вопрос."
+)
+
+SAVED_FOOTER = "➕ <i>Сохранил в словарь — спрошу на тренировке</i>"
+DROPPED_FOOTER = "🗑 <i>Убрал из словаря</i>"
+
+LOOKUP_FAILED = (
+    "Не разобрал этот фрагмент. Попробуй выделить слово или фразу покороче."
+)
+LOOKUP_TOO_LONG = (
+    "Это слишком длинный кусок. Выдели слово или фразу — а весь ответ целиком "
+    "разберёт кнопка «Подробнее»."
+)
 
 
 def _e(text: str) -> str:
@@ -156,11 +173,11 @@ def render_progress(
     return _truncate("\n\n".join(parts))
 
 
-def render_words(words: Sequence[VocabWord], total: int) -> str:
+def render_words(words: Sequence[VocabWord], total: int, due: int = 0) -> str:
     if not words:
         return (
-            "Словарь пока пуст. Я добавляю сюда слова, которые ввожу в разговоре — "
-            "поговори со мной, и он начнёт наполняться."
+            "Словарь пока пуст. Сюда попадают слова, которые я ввожу в разговоре, "
+            "и те, что ты сам просишь разобрать.\n\n" + LOOKUP_HINT
         )
     lines = [f"<b>Твой словарь</b> — {total} слов, последние {len(words)}:"]
     for word in words:
@@ -170,6 +187,33 @@ def render_words(words: Sequence[VocabWord], total: int) -> str:
         lines.append(line)
         if word.example:
             lines.append(f"   <i>{_e(word.example)}</i>")
+    if due:
+        lines.append("")
+        lines.append(f"К повторению готово {due} — жми «🎯 Тренировка».")
+    return _truncate("\n".join(lines))
+
+
+def render_lookup(card: Lookup) -> str:
+    """Карточка выделенного слова: перевод, звучание, пример, грабли."""
+    head = f"📖 <b>{_e(card.term)}</b>"
+    if card.translation:
+        head += f" — {_e(card.translation)}"
+    lines = [head]
+    if card.ipa:
+        lines.append(f"🗣 /{_e(card.ipa)}/")
+    if card.meaning:
+        lines.append("")
+        lines.append(_e(card.meaning))
+    if card.example:
+        lines.append("")
+        lines.append(f"<i>{_e(card.example)}</i>")
+        if card.example_ru:
+            lines.append(f"<i>{_e(card.example_ru)}</i>")
+    if card.note:
+        lines.append("")
+        lines.append(f"💡 {_e(card.note)}")
+    lines.append("")
+    lines.append(SAVED_FOOTER)
     return _truncate("\n".join(lines))
 
 
@@ -189,13 +233,21 @@ DRILL_NOTHING_TO_DO = (
 )
 
 
+#: Что делать с предложением — зависит от вида задания.
+DRILL_TASK_PROMPTS = {
+    "error": "Найди ошибку и напиши предложение правильно:",
+    "word": "Вставь пропущенное слово и напиши предложение целиком:",
+}
+
+
 def render_drill_task(index: int, total: int, exercise: dict) -> str:
     focus = exercise.get("focus") or ""
     head = f"<b>Задание {index} из {total}</b>"
     if focus:
         head += f" — {_e(focus)}"
+    prompt = DRILL_TASK_PROMPTS.get(exercise.get("kind", "error"), DRILL_TASK_PROMPTS["error"])
     return (
-        f"{head}\n\nНайди ошибку и напиши предложение правильно:\n\n"
+        f"{head}\n\n{prompt}\n\n"
         f"<code>{_e(exercise.get('sentence', ''))}</code>"
     )
 

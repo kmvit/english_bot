@@ -11,14 +11,26 @@ import openai
 from .config import Config
 from .costs import TokenUsage
 from .db import ErrorStat, Profile
-from .parsing import REPLY_SCHEMA, TeacherReply, parse_level, parse_teacher_reply
+from .parsing import (
+    LOOKUP_SCHEMA,
+    REPLY_SCHEMA,
+    Lookup,
+    TeacherReply,
+    parse_level,
+    parse_lookup,
+    parse_teacher_reply,
+)
 from .prompts import (
     DRILL_CHECK_SYSTEM,
     DRILL_SYSTEM,
     LEVEL_CHECK_SYSTEM,
+    LOOKUP_SYSTEM,
+    WORD_DRILL_SYSTEM,
     build_drill_check_turn,
     build_drill_turn,
+    build_lookup_turn,
     build_system_messages,
+    build_word_drill_turn,
 )
 
 log = logging.getLogger(__name__)
@@ -220,23 +232,47 @@ class Teacher:
             schema_name="drill",
         )
         usage = TokenUsage.from_response(getattr(response, "usage", None))
-        payload = _loads_object(_message_text(response))
-        raw = payload.get("exercises") if isinstance(payload, dict) else None
-        exercises = []
-        for item in raw or []:
-            if not isinstance(item, dict):
-                continue
-            sentence = str(item.get("sentence", "")).strip()
-            if not sentence:
-                continue
-            exercises.append(
+        return _exercises(_message_text(response)), usage, model
+
+    async def make_word_drill(
+        self, profile: Profile, words: Sequence[tuple[str, str]]
+    ) -> tuple[list[dict[str, str]], TokenUsage, str]:
+        """Составить по одному заданию на пропуск на каждое слово."""
+        response, model = await self._create(
+            messages=[
+                {"role": "system", "content": WORD_DRILL_SYSTEM},
                 {
-                    "sentence": sentence,
-                    "answer": str(item.get("answer", "")).strip(),
-                    "focus": str(item.get("focus", "")).strip(),
-                }
-            )
-        return exercises, usage, model
+                    "role": "user",
+                    "content": build_word_drill_turn(
+                        profile.level, profile.interests, words
+                    ),
+                },
+            ],
+            max_tokens=MAX_REPLY_TOKENS,
+            schema=DRILL_SCHEMA,
+            schema_name="word_drill",
+        )
+        usage = TokenUsage.from_response(getattr(response, "usage", None))
+        return _exercises(_message_text(response)), usage, model
+
+    async def lookup(
+        self, fragment: str, context: str = "", question: str = ""
+    ) -> tuple[Lookup | None, TokenUsage, str]:
+        """Разобрать выделенный фрагмент. None — если модель ответила не по делу."""
+        response, model = await self._create(
+            messages=[
+                {"role": "system", "content": LOOKUP_SYSTEM},
+                {
+                    "role": "user",
+                    "content": build_lookup_turn(fragment, context, question),
+                },
+            ],
+            max_tokens=MAX_PLAIN_TOKENS,
+            schema=LOOKUP_SCHEMA,
+            schema_name="lookup",
+        )
+        usage = TokenUsage.from_response(getattr(response, "usage", None))
+        return parse_lookup(_message_text(response), fragment), usage, model
 
     async def check_drill(
         self, sentence: str, answer: str, student: str, focus: str
@@ -353,6 +389,26 @@ class Teacher:
             self._format_mode = FORMAT_NONE
             return True
         return False
+
+
+def _exercises(text: str) -> list[dict[str, str]]:
+    """Достать задания из ответа модели, отбросив всё без предложения."""
+    raw = _loads_object(text).get("exercises")
+    exercises = []
+    for item in raw or []:
+        if not isinstance(item, dict):
+            continue
+        sentence = str(item.get("sentence", "")).strip()
+        if not sentence:
+            continue
+        exercises.append(
+            {
+                "sentence": sentence,
+                "answer": str(item.get("answer", "")).strip(),
+                "focus": str(item.get("focus", "")).strip(),
+            }
+        )
+    return exercises
 
 
 def _loads_object(text: str) -> dict[str, Any]:

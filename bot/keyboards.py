@@ -34,6 +34,7 @@ CFG_DAILY_SET = "cfg:daily:"
 TOPIC_PICK = "topic:"
 REPLY_TRANSLATE = "reply:translate"
 REPLY_EXPLAIN = "reply:explain"
+WORD_DROP = "word:drop:"          # убрать слово, сохранённое по разбору
 
 # --- подписи нижней клавиатуры ----------------------------------------
 BTN_DRILL = "🎯 Тренировка"
@@ -175,6 +176,19 @@ def reply_actions(translated: bool = False) -> InlineKeyboardMarkup:
         )
     buttons.append(InlineKeyboardButton(text="💡 Подробнее", callback_data=REPLY_EXPLAIN))
     return InlineKeyboardMarkup(inline_keyboard=[buttons])
+
+
+def lookup_actions(word_id: int) -> InlineKeyboardMarkup:
+    """Единственное действие под карточкой слова: передумать и убрать его."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="🗑 Не сохранять", callback_data=f"{WORD_DROP}{word_id}"
+                )
+            ]
+        ]
+    )
 
 
 def main_keyboard() -> ReplyKeyboardMarkup:

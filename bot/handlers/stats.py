@@ -41,7 +41,13 @@ async def cmd_progress(
 async def cmd_words(message: Message, db: Database) -> None:
     user_id = message.from_user.id
     words = await db.recent_words(user_id, limit=20)
-    await message.answer(render_words(words, await db.words_total(user_id)))
+    await message.answer(
+        render_words(
+            words,
+            await db.words_total(user_id),
+            due=await db.words_due_total(user_id),
+        )
+    )
 
 
 async def cmd_cost(message: Message, db: Database, config: Config) -> None:

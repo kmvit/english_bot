@@ -192,3 +192,35 @@ def test_expand_is_empty_when_not_needed():
 
 def test_non_string_expand_is_ignored():
     assert parse_teacher_reply('{"reply": "ok", "expand": 42}').expand == ""
+
+
+# --- карточка слова -----------------------------------------------------
+
+
+def test_parse_lookup_reads_the_card():
+    from bot.parsing import parse_lookup
+
+    card = parse_lookup(
+        '{"term": "grab", "translation": "схватить", "meaning": "взять быстро",'
+        ' "ipa": "/ɡræb/", "example": "Grab it.", "example_ru": "Хватай.", "note": ""}'
+    )
+    assert card is not None
+    assert (card.term, card.translation) == ("grab", "схватить")
+    # Слэши модель ставит то так, то эдак — карточка рисует их сама.
+    assert card.ipa == "ɡræb"
+    assert card.note == ""
+
+
+def test_parse_lookup_falls_back_to_the_highlighted_fragment():
+    from bot.parsing import parse_lookup
+
+    card = parse_lookup('{"translation": "схватить"}', fallback_term="grabbed")
+    assert card is not None and card.term == "grabbed"
+
+
+def test_parse_lookup_rejects_prose():
+    from bot.parsing import parse_lookup
+
+    assert parse_lookup("Это слово значит «схватить».") is None
+    assert parse_lookup("") is None
+    assert parse_lookup("{}") is None

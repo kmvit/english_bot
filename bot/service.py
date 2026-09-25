@@ -13,7 +13,8 @@ from .assessment import Assessment
 from .config import Config
 from .costs import LLM, STT, TTS, TokenUsage, llm_cost, stt_cost, tts_cost
 from .db import Database, utc_now
-from .formatting import render_reply, render_weekly_digest
+from .formatting import LOOKUP_HINT, render_reply, render_weekly_digest
+from .parsing import Lookup
 from .prompts import (
     DAILY_QUESTION_SYSTEM,
     EXPLAIN_SYSTEM,
@@ -28,6 +29,23 @@ from .audio import AudioError, to_ogg_opus
 log = logging.getLogger(__name__)
 
 
+def _interleave(
+    first: list[dict[str, Any]], second: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Перемешать два списка заданий через одно, начиная с первого.
+
+    Вперемешку, а не блоками: пять однотипных заданий подряд читаются как
+    список, и ученик перестаёт вдумываться уже на третьем.
+    """
+    mixed: list[dict[str, Any]] = []
+    for index in range(max(len(first), len(second))):
+        if index < len(first):
+            mixed.append(first[index])
+        if index < len(second):
+            mixed.append(second[index])
+    return mixed
+
+
 def _mentions(text: str, word: str) -> bool:
     """Слово встретилось в тексте как отдельное слово, а не частью другого."""
     if not word:
@@ -37,6 +55,13 @@ def _mentions(text: str, word: str) -> bool:
 LEVEL_CHECK_SAMPLE = 15
 #: Сколько ранее введённых слов показывать модели, чтобы она их переиспользовала.
 KNOWN_WORDS_IN_PROMPT = 25
+#: Сколько слов из словаря попадает в одну тренировку рядом с ошибками.
+WORDS_PER_DRILL = 2
+#: На каком по счёту сообщении подсказать про разбор выделенного фрагмента.
+#: Не на первом: сначала нужно увидеть, как бот вообще отвечает.
+HINT_AT_MESSAGE = 3
+#: Длиннее этого выделенный фрагмент разбирать бессмысленно — это уже абзац.
+MAX_LOOKUP_CHARS = 200
 
 
 @dataclass
@@ -48,6 +73,8 @@ class TurnResult:
     voice_only: bool = False
     #: Перевод уже показан — кнопка «Перевести» не нужна.
     translated: bool = False
+    #: Разовая подсказка вдогонку ответу. Пусто, когда подсказывать нечего.
+    hint: str = ""
 
 
 class TeacherService:
@@ -129,6 +156,7 @@ class TeacherService:
             voice_enabled=profile.voice_replies,
             voice_only=voice_only,
             translated=bool(reply.reply_ru) and not voice_only,
+            hint=LOOKUP_HINT if total == HINT_AT_MESSAGE else "",
         )
 
     async def _log_llm(self, user_id: int, usage: TokenUsage, model: str) -> None:
@@ -158,6 +186,33 @@ class TeacherService:
         )
         await self._log_llm(user_id, usage, model)
         return text
+
+    # --- разбор выделенного фрагмента -----------------------------------
+
+    async def lookup(
+        self, user_id: int, fragment: str, context: str = "", question: str = ""
+    ) -> tuple[Lookup, int] | None:
+        """Разобрать фрагмент и сразу положить его в словарь.
+
+        Возвращает карточку и id сохранённого слова — по нему ученик может
+        передумать и убрать слово. None — если модель ответила не по делу.
+        """
+        card, usage, model = await self._teacher.lookup(fragment, context, question)
+        await self._log_llm(user_id, usage, model)
+        if card is None:
+            return None
+        word_id = await self._db.save_word(
+            user_id,
+            card.term,
+            meaning=card.translation or None,
+            example=card.example or None,
+            source="asked",
+        )
+        return card, word_id
+
+    async def forget_word(self, user_id: int, word_id: int) -> str | None:
+        """Убрать слово, сохранённое по ошибке. Возвращает само слово."""
+        return await self._db.delete_word(user_id, word_id)
 
     # --- инициатива бота -------------------------------------------------
 
@@ -195,23 +250,53 @@ class TeacherService:
     # --- тренировка ошибок ----------------------------------------------
 
     async def start_drill(self, user_id: int, limit: int = 3) -> list[dict[str, Any]]:
-        """Составить задания по ошибкам, которые пора повторить.
+        """Составить задания: ошибки, которые пора повторить, и слова из словаря.
 
-        Пустой список означает, что повторять нечего: либо ошибок ещё нет,
-        либо все отлёживают срок после верных ответов.
+        Пустой список означает, что повторять нечего: либо материала ещё нет,
+        либо всё отлёживает срок после верных ответов.
         """
         errors = await self._db.errors_due_for_drill(user_id, limit=limit)
-        if not errors:
+        words = await self._db.words_due_for_drill(user_id, limit=WORDS_PER_DRILL)
+        if not errors and not words:
             return []
         profile = await self._db.ensure_profile(user_id)
-        exercises, usage, model = await self._teacher.make_drill(
-            profile, [error.description for error in errors]
-        )
-        await self._log_llm(user_id, usage, model)
-        return [
-            {**exercise, "error_id": error.id, "description": error.description}
-            for exercise, error in zip(exercises, errors)
-        ]
+
+        error_tasks: list[dict[str, Any]] = []
+        if errors:
+            exercises, usage, model = await self._teacher.make_drill(
+                profile, [error.description for error in errors]
+            )
+            await self._log_llm(user_id, usage, model)
+            error_tasks = [
+                {
+                    **exercise,
+                    "kind": "error",
+                    "error_id": error.id,
+                    "description": error.description,
+                }
+                for exercise, error in zip(exercises, errors)
+            ]
+
+        word_tasks: list[dict[str, Any]] = []
+        if words:
+            try:
+                exercises, usage, model = await self._teacher.make_word_drill(
+                    profile, [(w.word, w.meaning or "") for w in words]
+                )
+            except LLMError:
+                # Слова — добавка к разбору ошибок. Если задания на них не
+                # составились, тренировка всё равно должна состояться.
+                if not error_tasks:
+                    raise
+                log.warning("Задания на слова не составились, оставляю только ошибки")
+            else:
+                await self._log_llm(user_id, usage, model)
+                word_tasks = [
+                    {**exercise, "kind": "word", "word_id": word.id, "word": word.word}
+                    for exercise, word in zip(exercises, words)
+                ]
+
+        return _interleave(error_tasks, word_tasks)
 
     async def check_drill_answer(
         self, user_id: int, exercise: dict[str, Any], student_answer: str
@@ -223,9 +308,10 @@ class TeacherService:
             exercise.get("focus", ""),
         )
         await self._log_llm(user_id, usage, model)
-        error_id = exercise.get("error_id")
-        if error_id:
-            await self._db.record_drill_result(int(error_id), correct)
+        if exercise.get("word_id"):
+            await self._db.record_word_drill_result(int(exercise["word_id"]), correct)
+        elif exercise.get("error_id"):
+            await self._db.record_drill_result(int(exercise["error_id"]), correct)
         return correct, feedback
 
     # --- голос ----------------------------------------------------------

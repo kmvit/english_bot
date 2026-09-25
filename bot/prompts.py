@@ -149,13 +149,41 @@ For each mistake you are given, write exactly one sentence that contains that mi
 
 Return one exercise per mistake, in the same order."""
 
-DRILL_CHECK_SYSTEM = """You check one answer in an error-correction exercise for an English learner.
+DRILL_CHECK_SYSTEM = """You check one answer in an exercise for an English learner.
 
-You get the original sentence with a mistake, the correct version, and what the student wrote.
-Mark `correct` true when the student fixed the target mistake. Ignore differences that do not matter: capitalisation, final punctuation, contractions (I am / I'm), and any wording that is equally correct English.
-Mark it false when the target mistake is still there or the student introduced a new one.
+You get the exercise sentence, the correct version, and what the student wrote. The exercise is one of two kinds, and you can tell them apart by the sentence: either it contains a mistake to fix, or it contains a gap (___) to fill with a word the student is learning.
+Mark `correct` true when the student fixed the target mistake, or filled the gap with the right word. Ignore differences that do not matter: capitalisation, final punctuation, contractions (I am / I'm), the word form required by the sentence (grab / grabbed), and any wording that is equally correct English.
+Mark it false when the target mistake is still there, the gap is filled with a different word, or the student introduced a new mistake.
 
 `feedback` is one short line in Russian: what exactly was wrong and the rule in a few words. No praise, no filler, no restating the whole sentence."""
+
+
+WORD_DRILL_SYSTEM = """You write gap-fill exercises that make an English learner recall words they saved earlier.
+
+For each word you are given, write exactly one sentence where that word is the only word that fits, and replace it with ___. Rules:
+- The gap must be recoverable: the rest of the sentence has to point at this word and no other synonym. A sentence where five words would fit teaches nothing.
+- Everything around the gap is correct English at the student's level. No second gap, no mistakes to find.
+- 6 to 12 words. Something this student might actually say, on their own topics.
+- Never put the word itself, or a word with the same root, anywhere else in the sentence.
+- `answer` is the full sentence with the gap filled in, in the form the sentence requires.
+- `focus` is the word with its short Russian meaning, e.g. "grab — схватить".
+
+Return one exercise per word, in the same order."""
+
+
+LOOKUP_SYSTEM = """A student highlighted a word or phrase in their tutor's message and wants it explained.
+
+You get the fragment, the message it came from, and sometimes a question the student typed.
+- `term`: the dictionary form of the fragment — lemma for a single word ("grabbed" -> "grab"), the idiom itself for a phrase ("was looking forward to" -> "look forward to"). Leave it as it is when it is already a base form.
+- `translation`: the Russian equivalent in THIS context, one to three words. Not a list of every meaning the word has.
+- `meaning`: one line in Russian — what it means, plus the shade a dictionary translation loses. Say it outright when the word is informal, rude, dated or regional.
+- `ipa`: IPA transcription of `term`, no slashes. Empty for phrases of more than three words.
+- `example`: one short English sentence using `term` — a different one from the sentence it was taken from.
+- `example_ru`: Russian translation of that example.
+- `note`: if the student asked a question, answer it here in Russian. Otherwise give the one thing that trips Russian speakers up with this word — the preposition that always follows it, an irregular form, a false friend. Leave it empty when there is nothing worth saying; padding here is worse than silence.
+
+This is a dictionary card, not a lesson: no greeting, no follow-up question, nothing about the student's own mistakes.
+If the fragment is a whole sentence rather than a word or phrase, explain it anyway and put the sentence in `term`."""
 
 TRANSLATE_SYSTEM = """You translate one message from an English tutor into Russian for their student.
 
@@ -287,6 +315,28 @@ def build_drill_turn(
         f"Student level: {level or 'A2'}. Interests: {interests or 'unknown'}.\n"
         f"Mistakes to practise:\n{listed}"
     )
+
+
+def build_word_drill_turn(
+    level: str | None, interests: str | None, words: Sequence[tuple[str, str]]
+) -> str:
+    listed = "\n".join(
+        f"{i}. {word}" + (f" — {meaning}" if meaning else "")
+        for i, (word, meaning) in enumerate(words, 1)
+    )
+    return (
+        f"Student level: {level or 'A2'}. Interests: {interests or 'unknown'}.\n"
+        f"Words to recall:\n{listed}"
+    )
+
+
+def build_lookup_turn(fragment: str, context: str = "", question: str = "") -> str:
+    lines = [f'Highlighted fragment: "{fragment}"']
+    if context.strip():
+        lines.append(f"It appeared in this message:\n{context.strip()}")
+    if question.strip():
+        lines.append(f'The student also asked: "{question.strip()}"')
+    return "\n\n".join(lines)
 
 
 def build_drill_check_turn(sentence: str, answer: str, student: str, focus: str) -> str:
